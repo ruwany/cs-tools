@@ -240,7 +240,7 @@ func (e *incidentLifecycleEnv) assertIncidentLifecycleState(t *testing.T, id, wa
 	return row
 }
 
-func strOrNil(p *string) string {
+func ilStrOrNil(p *string) string {
 	if p == nil {
 		return "<nil>"
 	}
@@ -256,7 +256,7 @@ func TestIncidentLifecycleIntegration_FullLifecycle(t *testing.T) {
 
 	row := e.assertIncidentLifecycleState(t, id, "NEW", "NEW")
 	if row.AssignedToID != nil || row.AssignmentGroupID != nil {
-		t.Fatalf("new incident assignee=%s group=%s, want both unset", strOrNil(row.AssignedToID), strOrNil(row.AssignmentGroupID))
+		t.Fatalf("new incident assignee=%s group=%s, want both unset", ilStrOrNil(row.AssignedToID), ilStrOrNil(row.AssignmentGroupID))
 	}
 
 	// New -> In Progress. The incident is unassigned, so the portal claims it
@@ -265,8 +265,8 @@ func TestIncidentLifecycleIntegration_FullLifecycle(t *testing.T) {
 	// has no gate on this transition either.
 	e.mustPatch(t, id, `{"state":"IN_PROGRESS","assignedEngineerId":"`+ilEngineerID+`"}`)
 	row = e.assertIncidentLifecycleState(t, id, "IN_PROGRESS", "IN_PROGRESS")
-	if strOrNil(row.AssignedToID) != ilEngineerID {
-		t.Fatalf("after In Progress assigned_to_id = %s, want %s", strOrNil(row.AssignedToID), ilEngineerID)
+	if ilStrOrNil(row.AssignedToID) != ilEngineerID {
+		t.Fatalf("after In Progress assigned_to_id = %s, want %s", ilStrOrNil(row.AssignedToID), ilEngineerID)
 	}
 	if row.AssignmentGroupID != nil {
 		t.Fatalf("after In Progress assignment_group_id = %s, want unset", *row.AssignmentGroupID)
@@ -277,13 +277,13 @@ func TestIncidentLifecycleIntegration_FullLifecycle(t *testing.T) {
 	// PATCH; the assignee must survive both.
 	e.mustPatch(t, id, `{"state":"ON_HOLD"}`)
 	row = e.assertIncidentLifecycleState(t, id, "ON_HOLD", "ON_HOLD")
-	if strOrNil(row.AssignedToID) != ilEngineerID {
-		t.Fatalf("after On Hold assigned_to_id = %s, want %s", strOrNil(row.AssignedToID), ilEngineerID)
+	if ilStrOrNil(row.AssignedToID) != ilEngineerID {
+		t.Fatalf("after On Hold assigned_to_id = %s, want %s", ilStrOrNil(row.AssignedToID), ilEngineerID)
 	}
 	e.mustPatch(t, id, `{"state":"IN_PROGRESS"}`)
 	row = e.assertIncidentLifecycleState(t, id, "IN_PROGRESS", "IN_PROGRESS")
-	if strOrNil(row.AssignedToID) != ilEngineerID {
-		t.Fatalf("after resuming assigned_to_id = %s, want %s", strOrNil(row.AssignedToID), ilEngineerID)
+	if ilStrOrNil(row.AssignedToID) != ilEngineerID {
+		t.Fatalf("after resuming assigned_to_id = %s, want %s", ilStrOrNil(row.AssignedToID), ilEngineerID)
 	}
 
 	// In Progress -> Resolved needs a resolution code and notes, as in
@@ -295,11 +295,11 @@ func TestIncidentLifecycleIntegration_FullLifecycle(t *testing.T) {
 
 	e.mustPatch(t, id, `{"state":"RESOLVED","resolutionCode":"SOLVED_WORKAROUND","resolutionNotes":"Restarted the gateway."}`)
 	row = e.assertIncidentLifecycleState(t, id, "RESOLVED", "RESOLVED")
-	if strOrNil(row.ResolutionCode) != "SOLVED_WORK_AROUND" || strOrNil(row.CloseNotes) != "Restarted the gateway." {
-		t.Fatalf("after Resolved resolution_code=%s close_notes=%s", strOrNil(row.ResolutionCode), strOrNil(row.CloseNotes))
+	if ilStrOrNil(row.ResolutionCode) != "SOLVED_WORK_AROUND" || ilStrOrNil(row.CloseNotes) != "Restarted the gateway." {
+		t.Fatalf("after Resolved resolution_code=%s close_notes=%s", ilStrOrNil(row.ResolutionCode), ilStrOrNil(row.CloseNotes))
 	}
-	if row.ResolvedOn == nil || strOrNil(row.ResolvedByID) != ilEngineerID {
-		t.Fatalf("after Resolved resolved_on=%v resolved_by_id=%s, want set to now / %s", row.ResolvedOn, strOrNil(row.ResolvedByID), ilEngineerID)
+	if row.ResolvedOn == nil || ilStrOrNil(row.ResolvedByID) != ilEngineerID {
+		t.Fatalf("after Resolved resolved_on=%v resolved_by_id=%s, want set to now / %s", row.ResolvedOn, ilStrOrNil(row.ResolvedByID), ilEngineerID)
 	}
 	resolvedOn := *row.ResolvedOn
 	e.mirror.waitForMirroredState(t, domain.IncidentStateResolved)
@@ -324,7 +324,7 @@ func TestIncidentLifecycleIntegration_InProgressNeedsNoAssignee(t *testing.T) {
 	e.mustPatch(t, id, `{"state":"IN_PROGRESS"}`)
 	row := e.assertIncidentLifecycleState(t, id, "IN_PROGRESS", "IN_PROGRESS")
 	if row.AssignedToID != nil || row.AssignmentGroupID != nil {
-		t.Fatalf("assignee=%s group=%s, want both still unset", strOrNil(row.AssignedToID), strOrNil(row.AssignmentGroupID))
+		t.Fatalf("assignee=%s group=%s, want both still unset", ilStrOrNil(row.AssignedToID), ilStrOrNil(row.AssignmentGroupID))
 	}
 }
 
