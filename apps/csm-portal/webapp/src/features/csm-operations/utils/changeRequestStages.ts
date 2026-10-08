@@ -207,10 +207,11 @@ export interface BuildChangeRequestLifecycleInput {
   type?: string | null;
   /**
    * `GET /change-requests/{id}/approvals`, when loaded. Read for a rollback or canceled change, and, on an
-   * Emergency change, to tell a customer gate it went through from one it never had.
+   * Emergency change, to tell a customer gate it went through from one it never had (until it is loaded,
+   * only the change's state says so).
    */
   approvals?: readonly StageEvidence[];
-  /** The change's `hasCustomerApproved`: the customer's approval was recorded. Read for a canceled change and for an Emergency change's line. */
+  /** The change's `hasCustomerApproved`: the customer's approval was recorded. Read for a canceled change's statuses; which stages sit on an Emergency change's line ignores it. */
   customerApproved?: boolean;
   /**
    * Whether the change's project has registered customer contacts (its
@@ -231,9 +232,11 @@ export interface BuildChangeRequestLifecycleInput {
  *    unless the change is in that very state; an unknown (`undefined`) flag
  *    keeps the stage. An EMERGENCY change is the exception: it acts without
  *    customer consent and the flow ignores its boxes, so neither stage is on its
- *    line unless the record shows the change went there (it is in that state, the
- *    customer's approval is on record, or a stage row of that gate exists: a
- *    change raised before the rule).
+ *    line unless the record shows the change went there: it is in that state, or
+ *    a stage row of that gate exists (a change raised before the rule). Nothing
+ *    else counts, not even `customerApproved`: a stored flag need not be the
+ *    customer's answer (it can be a requirement), so it does not show the
+ *    customer was ever asked.
  *  - Rollback and Canceled are always on the line.
  *  - Assess stays on the line of an Emergency change but reads `not-taken` (the
  *    same muted, dashed marker the other stages the change does not take get): the
@@ -294,15 +297,10 @@ export function buildChangeRequestLifecycle({
   const onLine = (s: BeChangeRequestState): boolean => {
     if (s !== "customer_approval" && s !== "customer_review") return true;
     // An Emergency change acts without customer consent: whatever its boxes hold, the flow never asks the customer,
-    // so a customer stage is on its line only when the record shows the change went there (it is in that state, or the
-    // customer's outcome / a stage row of that gate is on record: a change raised before the rule).
-    if (emergency) {
-      return (
-        state === s ||
-        (s === "customer_approval" && customerApproved === true) ||
-        !!approvals?.some((row) => stageState(row) === s)
-      );
-    }
+    // so a customer stage is on its line only when the record shows the change went there: it is in that state, or a
+    // stage row of that gate exists (a change raised before the rule). `customerApproved` is not evidence here: a stored
+    // flag need not be the customer's answer (it can be a requirement).
+    if (emergency) return state === s || !!approvals?.some((row) => stageState(row) === s);
     return (s === "customer_approval" ? customerApprovalRequired : customerReviewRequired) !== false || state === s;
   };
 

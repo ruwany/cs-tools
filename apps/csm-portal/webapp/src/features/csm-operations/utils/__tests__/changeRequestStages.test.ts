@@ -618,10 +618,7 @@ describe("an Emergency change's line: Assess is never taken (New -> Authorize, o
     }
   });
 
-  it("keeps a customer gate the record shows an Emergency change went through: the customer's approval, or a stage row", () => {
-    expect(buildChangeRequestLifecycle({ state: "scheduled", type: "emergency", customerApproved: true }).map((n) => n.key)).toContain(
-      "customer_approval",
-    );
+  it("keeps a customer gate the record shows an Emergency change went through: a stage row of that gate", () => {
     const keys = buildChangeRequestLifecycle({
       state: "closed",
       type: "emergency",
@@ -635,11 +632,78 @@ describe("an Emergency change's line: Assess is never taken (New -> Authorize, o
     expect(keys).toContain("customer_review");
   });
 
+  describe("the customer-approval flag is not evidence for an Emergency change (it can be a requirement, never an outcome)", () => {
+    // A row whose stored flag is a requirement rather than the customer's answer: Closed, the flag stored true, no Customer
+    // Approval stage row at all (only its CAB stage, if anything). Columns: new assess authorize scheduled implement review rollback closed canceled
+    const migratedShape = (input: BuildChangeRequestLifecycleInput = {}): BuildChangeRequestLifecycleInput => ({
+      state: "closed",
+      type: "emergency",
+      customerApproved: true,
+      ...input,
+    });
+
+    it("has no Customer Approval node on its line, whether the approvals hold a CAB stage, nothing, or are not loaded yet", () => {
+      for (const approvals of [undefined, [], [{ stage: "CAB Approval", status: "APPROVED" }]]) {
+        const nodes = buildChangeRequestLifecycle(migratedShape({ approvals }));
+        expect(nodes.map((n) => n.key), JSON.stringify(approvals)).not.toContain("customer_approval");
+        expect(nodes.map((n) => n.status), JSON.stringify(approvals)).toEqual(row("d n d d d d n c n"));
+      }
+    });
+
+    it("has none in any state of its way either, and none when only the flag is stored (no boxes, no state)", () => {
+      for (const state of ["new", "authorize", "scheduled", "implement", "review", "closed", "rollback"]) {
+        const keys = buildChangeRequestLifecycle(migratedShape({ state, approvals: [] })).map((n) => n.key);
+        expect(keys, state).not.toContain("customer_approval");
+        expect(keys, state).not.toContain("customer_review");
+        expect(keys, state).toHaveLength(9);
+      }
+    });
+
+    it("still shows a Customer Approval stage the change really has, as stored", () => {
+      const nodes = buildChangeRequestLifecycle(
+        migratedShape({
+          approvals: [
+            { stage: "CAB Approval", status: "APPROVED" },
+            { stage: "Customer Approval", status: "APPROVED" },
+          ],
+        }),
+      );
+      expect(nodes.map((n) => [n.key, n.status])).toEqual([
+        ["new", "done"],
+        ["assess", "not-taken"],
+        ["authorize", "done"],
+        ["customer_approval", "done"],
+        ["scheduled", "done"],
+        ["implement", "done"],
+        ["review", "done"],
+        ["rollback", "not-taken"],
+        ["closed", "current"],
+        ["canceled", "not-taken"],
+      ]);
+    });
+
+    it("still shows the customer state the change is in, flag or no flag", () => {
+      for (const customerApproved of [true, false, undefined]) {
+        const nodes = buildChangeRequestLifecycle({ state: "customer_approval", type: "emergency", customerApproved, approvals: [] });
+        expect(nodes.find((n) => n.key === "customer_approval")?.status, String(customerApproved)).toBe("current");
+      }
+    });
+  });
+
   it("a Normal change is untouched by all of this: its boxes alone decide", () => {
     expect(buildChangeRequestLifecycle({ state: "authorize", type: "normal", customerApprovalRequired: true }).map((n) => n.key)).toContain(
       "customer_approval",
     );
     expect(buildChangeRequestLifecycle({ state: "authorize", type: "normal" })).toHaveLength(11);
+    // The customer-approval flag changes nothing on a Normal change's line, as before: its own box decides.
+    for (const customerApproved of [true, false, undefined]) {
+      expect(
+        buildChangeRequestLifecycle({ state: "closed", type: "normal", customerApprovalRequired: true, customerApproved }).map((n) => n.key),
+      ).toContain("customer_approval");
+      expect(
+        buildChangeRequestLifecycle({ state: "closed", type: "normal", customerApprovalRequired: false, customerApproved }).map((n) => n.key),
+      ).not.toContain("customer_approval");
+    }
   });
 
   it("only Emergency skips Assess: Normal, Standard and an unknown type still pass through it", () => {

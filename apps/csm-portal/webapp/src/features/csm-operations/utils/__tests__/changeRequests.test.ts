@@ -1058,10 +1058,24 @@ describe("the Emergency change type", () => {
       expect(isCustomerStepNotApplicable({ type: "emergency", state: "customer_review" }, "approval")).toBe(true);
     });
 
-    it("shows a step as it is when the customer's outcome is on record", () => {
-      expect(isCustomerStepNotApplicable({ ...emergency, hasCustomerApproved: true }, "approval")).toBe(false);
-      expect(isCustomerStepNotApplicable({ ...emergency, hasCustomerApproved: true }, "review")).toBe(true);
-      expect(isCustomerStepNotApplicable({ ...emergency, hasCustomerReviewed: true }, "review")).toBe(false);
+    it("does not read the stored customer flags as evidence: they can be a requirement, never an outcome", () => {
+      // A row whose stored flag is a requirement rather than the customer's answer: Closed, a flag stored true, no stage row of that gate.
+      const migratedShape = { type: "emergency", state: "closed", hasCustomerApproved: true, hasCustomerReviewed: true };
+      for (const approvals of [undefined, [], [{ stage: "CAB Approval" }]]) {
+        expect(isCustomerStepNotApplicable(migratedShape, "approval", approvals), JSON.stringify(approvals)).toBe(true);
+        expect(isCustomerStepNotApplicable(migratedShape, "review", approvals), JSON.stringify(approvals)).toBe(true);
+      }
+      const flagOnly = { ...emergency, hasCustomerApproved: true, hasCustomerReviewed: true };
+      expect(isCustomerStepNotApplicable(flagOnly, "approval")).toBe(true);
+      expect(isCustomerStepNotApplicable(flagOnly, "review")).toBe(true);
+    });
+
+    it("shows a step as it is when a stage row of that gate exists, whatever the flags hold", () => {
+      for (const flag of [true, false, undefined]) {
+        const cr = { type: "emergency", state: "closed", hasCustomerApproved: flag, hasCustomerReviewed: flag };
+        expect(isCustomerStepNotApplicable(cr, "approval", [{ stage: "CAB Approval" }, { stage: "Customer Approval" }]), String(flag)).toBe(false);
+        expect(isCustomerStepNotApplicable(cr, "review", [{ stage: "Customer Review" }]), String(flag)).toBe(false);
+      }
     });
 
     it("shows a step as it is when a stage row of that gate exists, however the backend spells it", () => {
@@ -1077,6 +1091,9 @@ describe("the Emergency change type", () => {
       for (const type of ["normal", "standard", "model", undefined, null]) {
         expect(isCustomerStepNotApplicable({ type, state: "authorize" }, "approval"), String(type)).toBe(false);
         expect(isCustomerStepNotApplicable({ type, state: "authorize" }, "review"), String(type)).toBe(false);
+        // Whatever the stored flags and stage rows hold.
+        const closedWithFlag = { type, state: "closed", hasCustomerApproved: true };
+        expect(isCustomerStepNotApplicable(closedWithFlag, "approval", []), String(type)).toBe(false);
       }
     });
   });

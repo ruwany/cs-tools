@@ -3657,6 +3657,50 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
     view.unmount();
   });
 
+  // A closed Emergency change whose stored customer-approval flag is a requirement, not the customer's answer: its CAB stage,
+  // the flag stored true and no stage row of a customer gate. The page must not read the flag as consent.
+  it("a closed Emergency change with the customer-approval flag stored and no customer stage row reads Not applicable, and has no Customer Approval on the line", () => {
+    lcSeed("emergency", { approval: true, review: true }, { members: LC_MEMBERS });
+    lc.approvals = [{ ...lcStage("CAB Approval", "CAB", LC_CAB), status: "APPROVED", approvers: [{ id: LC_CAB.id, name: LC_CAB.name, status: "APPROVED" }] }];
+    lc.cr = { ...lc.cr, hasCustomerApproved: true, hasCustomerReviewed: true };
+    lcSetState("closed");
+    lcPublish();
+    const view = lcOpenAs(LC_CREATOR);
+    const reading = (label: string): string => within(screen.getByText(label).parentElement!).getByText(/^(Yes|No|Not applicable)$/).textContent ?? "";
+    for (const label of ["Customer approval required", "Customer review required", "Customer approved", "Customer reviewed"]) {
+      expect(reading(label), label).toBe("Not applicable");
+    }
+    expect(stepLabels()).not.toContain("Customer Approval");
+    expect(stepLabels()).not.toContain("Customer Review");
+    expect(stepLabels()).toHaveLength(9);
+    expect(currentStep()).toBe("Closed");
+    view.unmount();
+  });
+
+  it("an Emergency change that really has a Customer Approval stage row (raised before the rule) still reads as stored: Yes, and the stage on the line", () => {
+    lcSeed("emergency", { approval: true, review: false }, { members: LC_MEMBERS });
+    lc.approvals = [
+      { ...lcStage("ECAB Approval", "ECAB", LC_ECAB), status: "APPROVED", approvers: [{ id: LC_ECAB.id, name: LC_ECAB.name, status: "APPROVED" }] },
+      {
+        ...lcStage("Customer Approval", "Customer Group", LC_MEMBERS[0]!),
+        status: "APPROVED",
+        approvers: [{ id: LC_MEMBERS[0]!.id, name: LC_MEMBERS[0]!.name, status: "APPROVED" }],
+      },
+    ];
+    lc.cr = { ...lc.cr, hasCustomerApproved: true };
+    lcSetState("closed");
+    lcPublish();
+    const view = lcOpenAs(LC_CREATOR);
+    expect(metaValue("Customer approval required")).toBe("Yes");
+    expect(metaValue("Customer approved")).toBe("Yes");
+    expect(stepLabels()).toContain("Customer Approval");
+    expect(stepReading("Customer Approval")).toBe("Customer Approval, done");
+    // The review it never had still reads Not applicable.
+    expect(within(screen.getByText("Customer review required").parentElement!).getByText("Not applicable")).toBeInTheDocument();
+    expect(stepLabels()).not.toContain("Customer Review");
+    view.unmount();
+  });
+
   it("a Normal change on the same page still reads Yes / No there", () => {
     lcSeed("normal");
     const view = lcOpenAs(LC_CREATOR);

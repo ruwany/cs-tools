@@ -320,23 +320,26 @@ export const CUSTOMER_STEP_NOT_APPLICABLE = "Not applicable";
  * and what the customer confirmed -- is not applicable to this change: it is an
  * Emergency change, which acts without customer consent (the flow ignores its two
  * boxes), and nothing on the record shows it went through that gate. An Emergency
- * change raised before the rule can still sit in a customer state, carry the
- * customer's outcome or hold a stage row for the gate: then the step is shown as
- * it is, never hidden.
+ * change raised before the rule can still sit in a customer state or hold a stage
+ * row for the gate: then the step is shown as it is, never hidden.
+ *
+ * Only those two count as evidence. The change's `hasCustomerApproved` /
+ * `hasCustomerReviewed` do not: a stored flag need not be the customer's answer (it
+ * can be a requirement), and reading it as one could show a consent that was never
+ * given.
  *
  * `approvals` is `GET /change-requests/{id}/approvals`; while it is not loaded the
- * stage rows count for nothing, and the state and the customer's outcome speak.
+ * stage rows count for nothing, and only the state speaks.
  */
 export function isCustomerStepNotApplicable(
-  cr: Pick<BeChangeRequestDetail, "type" | "state" | "hasCustomerApproved" | "hasCustomerReviewed">,
+  cr: Pick<BeChangeRequestDetail, "type" | "state">,
   step: "approval" | "review",
   approvals?: readonly Pick<BeChangeRequestApproval, "stage">[],
 ): boolean {
   if (!isEmergencyChangeRequestType(cr.type)) return false;
   const stage = step === "approval" ? "Customer Approval" : "Customer Review";
   const gateState = step === "approval" ? "customer_approval" : "customer_review";
-  const outcome = step === "approval" ? cr.hasCustomerApproved : cr.hasCustomerReviewed;
-  return !(cr.state === gateState || outcome === true || approvals?.some((a) => approvalStageLabel(a.stage) === stage));
+  return !(cr.state === gateState || approvals?.some((a) => approvalStageLabel(a.stage) === stage));
 }
 
 /**
