@@ -68,6 +68,38 @@ func TestEffectiveCustomerGates(t *testing.T) {
 	}
 }
 
+// The gates a change has ahead of it, or is waiting at, read as the flow reads the boxes: for any
+// model but Emergency they are customerGatesAhead's; an Emergency change has none ahead whatever its
+// boxes say, except the one it is already waiting at (the customer's question stands there), and not
+// the other one -- Customer Approval is not followed by a Customer Review for an Emergency change.
+func TestCustomerGatesAheadForModel(t *testing.T) {
+	states := []string{"", "NEW", "ASSESS", "AUTHORIZE", "CUSTOMER_APPROVAL", "SCHEDULED", "IMPLEMENT", "REVIEW", "CUSTOMER_REVIEW", "CLOSED", "CANCELED", "ROLLBACK"}
+	for _, model := range []string{"NORMAL", "STANDARD", "", "AZURE"} {
+		for _, state := range states {
+			for _, a := range []bool{false, true} {
+				for _, r := range []bool{false, true} {
+					wantA, wantR := customerGatesAhead(state, a, r)
+					if gotA, gotR := customerGatesAheadForModel(state, model, a, r); gotA != wantA || gotR != wantR {
+						t.Errorf("customerGatesAheadForModel(%q, %q, %v, %v) = %v, %v, want customerGatesAhead's %v, %v", state, model, a, r, gotA, gotR, wantA, wantR)
+					}
+				}
+			}
+		}
+	}
+	for _, state := range states {
+		wantA, wantR := state == "CUSTOMER_APPROVAL", state == "CUSTOMER_REVIEW"
+		for _, model := range []string{"EMERGENCY", "emergency", " Emergency "} {
+			for _, a := range []bool{false, true} {
+				for _, r := range []bool{false, true} {
+					if gotA, gotR := customerGatesAheadForModel(state, model, a, r); gotA != wantA || gotR != wantR {
+						t.Errorf("customerGatesAheadForModel(%q, %q, %v, %v) = %v, %v, want %v, %v (the gate it is waiting at, whatever the boxes say)", state, model, a, r, gotA, gotR, wantA, wantR)
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestEffectiveChangeModel(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

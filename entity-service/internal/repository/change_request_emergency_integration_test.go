@@ -329,6 +329,125 @@ func TestChangeRequestEmergencyIntegration_LegacyBoxesAreIgnoredByTheGate(t *tes
 	})
 }
 
+// Rule 4c -- a PATCH that changes the requester must leave somebody to ask -- for a change that is
+// waiting at a customer gate. An Emergency change never ENTERS a customer state, but one already in
+// Customer Approval / Customer Review (a row from before the rule, or a migrated one) is waiting at
+// that gate, so naming the only contact who can be asked as the requester would bar them as the
+// creator and leave a later Re-schedule with nobody to ask: only Cancel would remain. The refusal is
+// the one a Normal change gets, names the gate the change is waiting at (and not the other one,
+// which an Emergency change never has), and writes nothing. An Emergency change that is NOT waiting
+// at a gate has none ahead, whatever its stored boxes say, and is not judged.
+func TestChangeRequestEmergencyIntegration_RequesterChangeAtACustomerGateLeavesSomebodyToAsk(t *testing.T) {
+	standIn := crStandInUserID
+	other := crFlowPeerAID // staff, not a contact of the project
+
+	// fixture makes a change on project C (whose only registered contact is the stand-in) in the
+	// given state. migrated adds the shape the sync leaves: both of its requirement flags set, our
+	// own boxes as given, and an UNLABELED stage in the customer group that asks the stand-in.
+	fixture := func(f *crFlow, typ domain.ChangeRequestType, state string, ours, migrated bool) string {
+		id := f.createWithProject(typ, sp(crScopeProjectC), false, false)
+		if ours {
+			f.execSQL(`UPDATE change_request SET customer_approval_required = true, customer_review_required = true WHERE id = $1`, id)
+		}
+		f.setPlanned(id, rsStart1, rsEnd1)
+		f.setState(id, state)
+		if migrated {
+			f.execSQL(`UPDATE change_request SET is_customer_approval_required = true, is_customer_review_required = true,
+			                  customer_group_id = $2::uuid WHERE id = $1`, id, crFlowGroupID)
+			g := crFlowGroupID
+			f.seedMigratedStage(id, &g, 40, map[string]string{standIn: "REQUESTED"})
+		}
+		return id
+	}
+	subject := func(f *crFlow, id string) string {
+		var s string
+		if err := f.scoped.QueryRow(f.sys, `SELECT subject FROM work_item WHERE id = $1`, id).Scan(&s); err != nil {
+			f.t.Fatalf("read the subject: %v", err)
+		}
+		return s
+	}
+	refused := func(t *testing.T, f *crFlow, id, when, msg string) {
+		t.Helper()
+		before, stored, title := f.snap(id), f.requestedBy(id), subject(f, id)
+		_, err := f.patch(id, domain.PatchChangeRequestRequest{RequestedByID: asRequester(&standIn), Title: sp("must not be written")})
+		f.wantExact("naming the only contact as the requester "+when, err, msg)
+		f.wantRefusedSame("naming the only contact as the requester "+when, id, before, err)
+		if got := f.requestedBy(id); got != stored {
+			t.Fatalf("a refused request changed the requester %s: %q -> %q", when, stored, got)
+		}
+		if got := subject(f, id); got != title {
+			t.Fatalf("a refused request wrote the title %s: %q -> %q", when, title, got)
+		}
+		// Naming somebody who is no contact, clearing the field and resending the stored value
+		// leave the contact askable and are accepted.
+		for _, who := range []**string{asRequester(&other), asRequester(nil), asRequester(sp(crFlowCreatorID))} {
+			if _, err := f.patch(id, domain.PatchChangeRequestRequest{RequestedByID: who}); err != nil {
+				t.Fatalf("a requester change that leaves the contact to ask %s: %v", when, err)
+			}
+		}
+	}
+	accepted := func(t *testing.T, f *crFlow, id, when string) {
+		t.Helper()
+		if _, err := f.patch(id, domain.PatchChangeRequestRequest{RequestedByID: asRequester(&standIn)}); err != nil {
+			t.Fatalf("naming the only contact as the requester %s: %v", when, err)
+		}
+		if got := f.requestedBy(id); got != standIn {
+			t.Fatalf("requester %s = %q, want the contact", when, got)
+		}
+	}
+
+	for _, gate := range []struct{ state, msg string }{
+		{"CUSTOMER_APPROVAL", nobodyMsgApproval},
+		{"CUSTOMER_REVIEW", nobodyMsgReview},
+	} {
+		gate := gate
+		for _, shape := range []struct {
+			name           string
+			ours, migrated bool
+		}{
+			{"a row from before the rule, our boxes false", false, false},
+			{"a row from before the rule, both boxes ticked", true, false},
+			{"migrated shape: the sync's flags and an unlabeled stage", false, true},
+		} {
+			shape := shape
+			t.Run(gate.state+"/"+shape.name, func(t *testing.T) {
+				f := newCustomerGroupFlow(t)
+				f.standInContact(crScopeProjectC)
+				id := fixture(f, domain.ChangeRequestTypeEmergency, gate.state, shape.ours, shape.migrated)
+				if got := f.get(id).Type; got == nil || *got != "emergency" {
+					t.Fatalf("type = %v, want emergency", got)
+				}
+				sa, sr := f.syncFlags(id)
+				refused(t, f, id, "of an Emergency change in "+gate.state, gate.msg)
+				if a, r := f.syncFlags(id); a != sa || r != sr {
+					t.Fatalf("the sync's flags were written: %v/%v -> %v/%v", sa, sr, a, r)
+				}
+			})
+		}
+		// The control: a Normal change with the box of the gate it waits at ticked is refused with the
+		// same words. (A Normal row with the box false is not judged here: it is not what this test is about.)
+		t.Run(gate.state+"/control: a Normal change waiting at the same gate", func(t *testing.T) {
+			f := newCustomerGroupFlow(t)
+			f.standInContact(crScopeProjectC)
+			id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectC), gate.state == "CUSTOMER_APPROVAL", gate.state == "CUSTOMER_REVIEW")
+			f.setPlanned(id, rsStart1, rsEnd1)
+			f.setState(id, gate.state)
+			refused(t, f, id, "of a Normal change in "+gate.state, gate.msg)
+		})
+	}
+
+	// An Emergency change that is not waiting at a gate has none ahead, whatever its boxes say.
+	for _, state := range []string{"AUTHORIZE", "SCHEDULED", "IMPLEMENT", "REVIEW"} {
+		state := state
+		t.Run("not waiting at a gate: "+state, func(t *testing.T) {
+			f := newCustomerGroupFlow(t)
+			f.standInContact(crScopeProjectC)
+			id := fixture(f, domain.ChangeRequestTypeEmergency, state, true, true)
+			accepted(t, f, id, "of an Emergency change in "+state)
+		})
+	}
+}
+
 // A MIGRATED Emergency change that is sitting in a customer state: the previous system itself asked the
 // customer group (an UNLABELED stage in customer_group_id, EXTERNAL approvers), our own boxes
 // are false and the sync's requirement flags may be set. It is not stranded: it reads

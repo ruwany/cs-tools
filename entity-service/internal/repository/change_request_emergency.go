@@ -54,7 +54,10 @@ import (
 // the customer's own answer moves it, a Re-schedule or a counter-proposal asks the
 // project's contacts again, and one that cannot ask anybody is refused whole
 // (provisionCustomerStage, legacyStageWouldBeProvisioned, requireSomebodyToAskForWindow).
-// Cancelling a customer's request that nobody then replaces is never an outcome.
+// A change of the requester is judged there too (customerGatesAheadForModel, rule 4c): the
+// requester never answers their own change, so naming the only contact asked would leave a
+// Re-schedule nobody to ask. Cancelling a customer's request that nobody then replaces is
+// never an outcome.
 
 // changeModelEmergency is change_request.change_model's label for an Emergency change.
 const changeModelEmergency = "EMERGENCY"
@@ -89,6 +92,22 @@ func effectiveCustomerGates(model string, approvalRequired, reviewRequired bool)
 		return false, false
 	}
 	return approvalRequired, reviewRequired
+}
+
+// customerGatesAheadForModel is customerGatesAhead for a change of the given (upper-case)
+// change_model, the boxes read as the flow reads them (effectiveCustomerGates). An Emergency
+// change has no customer gate ahead of it, with ONE exception: a change that is already
+// WAITING at a gate (state CUSTOMER_APPROVAL / CUSTOMER_REVIEW -- a row from before the rule,
+// or one that was sent there by the previous system) still has that gate, whatever its boxes
+// say, because the customer's question stands there (see the file comment). The checks whose
+// job is to keep a change from being stranded at a gate nobody can answer (rule 4c,
+// checkRequestedByLeavesSomebodyToAsk) read the gates through here, so the Emergency override
+// cannot hide a gate the change is waiting at.
+func customerGatesAheadForModel(state, model string, approvalRequired, reviewRequired bool) (approval, review bool) {
+	if isEmergencyModel(model) {
+		return state == crStateCustomerApproval, state == crStateCustomerReview
+	}
+	return customerGatesAhead(state, approvalRequired, reviewRequired)
 }
 
 // legalChangeRequestNextStatesForModel is legalChangeRequestNextStates for a change of the

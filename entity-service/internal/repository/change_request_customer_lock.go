@@ -63,7 +63,8 @@ import (
 //     ticked into Emergency, is a 400 (checkEmergencyCustomerConsent, change_request_emergency.go).
 //     The rule judges what a request CHANGES: a write of the value a box already holds is
 //     the no-op it is everywhere here, and the flow ignores the boxes of an Emergency change
-//     whatever they say (effectiveCustomerGates).
+//     whatever they say (effectiveCustomerGates) -- except that one already WAITING at a
+//     customer gate still has that gate (customerGatesAheadForModel).
 //   - A new REQUESTER after Request Approval is never one more person to ask about a
 //     customer gate still ahead (the requester never approves their own change): a PATCH
 //     that changes requestedById is judged with the new requester in place of the stored
@@ -390,9 +391,9 @@ func checkRequestedByLeavesSomebodyToAsk(ctx context.Context, q crQuerier, workI
 	if req.CustomerReviewRequired != nil {
 		reviewRequired = *req.CustomerReviewRequired
 	}
-	// An Emergency change has no customer gate ahead whatever its boxes say.
-	approvalRequired, reviewRequired = effectiveCustomerGates(effectiveChangeModel(snap.model, req.Type), approvalRequired, reviewRequired)
-	approval, review := customerGatesAhead(snap.state, approvalRequired, reviewRequired)
+	// An Emergency change has no customer gate ahead whatever its boxes say -- except the
+	// one it is already waiting at (customerGatesAheadForModel).
+	approval, review := customerGatesAheadForModel(snap.state, effectiveChangeModel(snap.model, req.Type), approvalRequired, reviewRequired)
 	return requireSomebodyToAskWith(ctx, q, workItemID, snap.projectID, approval, review, req.RequestedByID)
 }
 

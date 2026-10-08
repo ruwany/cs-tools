@@ -3567,7 +3567,8 @@ invented an "ECAB Approval" stage in a group of its own; that is gone.
   * **Ignored by the flow** (`effectiveCustomerGates`: both read false for an Emergency change, the stored
     value left alone): CAB approval → `scheduled` (never `customer_approval`), Review → `closed` offered (never
     `customer_review`; `{state: customer_review}` is refused with the Emergency reason), Request Approval needs
-    no project for a ticked box, `legalNextStates`, the GitHub sync's `SetState`, the nobody-to-ask checks.
+    no project for a ticked box, `legalNextStates`, the GitHub sync's `SetState`, the nobody-to-ask checks
+    (but for the gate an Emergency change is already waiting at: next bullet).
     **Reads are untouched**: `customerApprovalRequired` / `customerReviewRequired` and the sync's
     `isCustomerApproved` / `isCustomerReviewed` show what is stored. This is what keeps a MIGRATED
     Emergency change (whose requirement flags `is_customer_*_required` are the sync's, overwritten on every
@@ -3583,6 +3584,11 @@ invented an "ECAB Approval" stage in a group of its own; that is gone.
     proposed time supersedes the request and **asks the contacts again** (a fresh stage, nothing through
     CAB again), and one nobody can be asked about is refused whole with the customers' request untouched
     (`requireSomebodyToAskForWindow`) -- a customer's request is never cancelled without a replacement.
+    A change of the requester is judged there too (rule 4c, below): an Emergency change counts a customer
+    gate as ahead exactly when it is waiting at it (`customerGatesAheadForModel`: Customer Approval ->
+    the approval gate, Customer Review -> the review gate, any other state -> none, whatever the boxes
+    say), so staff cannot name the only contact asked as the requester and leave a later Re-schedule
+    with nobody to ask -- `..._RequesterChangeAtACustomerGateLeavesSomebodyToAsk`.
     `..._RescheduleLegacyEmergencyInCustomerApproval`, `..._LegacyBoxesAreIgnoredByTheGate`,
     `..._MigratedEmergencyInACustomerStateIsAnswerable`.
   * **Clone / duplicate** is the webapp prefilling the create form from a change; there is no clone
@@ -4101,9 +4107,9 @@ The rules, in the order they are applied (**the first failing one wins, every re
      registered contact deactivated AFTER Request Approval. The change then reaches the gate with
      nobody asked, which is the dead end it always was (Cancel; Roll back from Customer
      Review; a Re-schedule is refused with nobody to ask; a contact who registers is asked when the stored `projectId` is
-     restated) -- `..._ResidualEdgeContactsLeaveAfterRequestApproval`. Emergency changes are out of
-     scope here (their boxes are forced off by their own rule); the refusal is type-blind and simply
-     never has a box to judge on one.
+     restated) -- `..._ResidualEdgeContactsLeaveAfterRequestApproval`. An Emergency change has no box to
+     judge (its boxes are forced off by their own rule), but one that is already waiting at a customer
+     gate is judged for that gate by the requester-change rule (rule 4c): `customerGatesAheadForModel`.
    - Tests: `change_request_nobody_to_ask_integration_test.go` (the matrix box x situation x action,
      as the superuser, as `csm_app` and on a copy whose approval tables have the sync's enum
      columns), `TestNobodyToAskMsg` / `TestAnyContactToAsk` / `TestBoxesTurnedOnAfterNew` (pure),
