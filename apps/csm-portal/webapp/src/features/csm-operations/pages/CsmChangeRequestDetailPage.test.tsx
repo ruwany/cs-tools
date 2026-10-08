@@ -185,6 +185,25 @@ vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
 vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
   AttachmentsWidget: () => null,
 }));
+// Export as PDF: the real report module runs, on top of recorders in place of jsPDF and the shared writer, so a test reads
+// the details table the page hands over (the same approach as changeRequestReportPdf.test.ts).
+const writePdfDetailsTableMock = vi.fn();
+vi.mock("jspdf", () => ({
+  jsPDF: class {
+    save(): void {}
+  },
+}));
+vi.mock("@utils/pdfReportKit", () => ({
+  condenseBlankLines: (t: string) => t,
+  htmlToPdfPlainText: (t: string) => t,
+  safeFileNamePart: (t: string) => t,
+  stampFooterPageNumbers: () => undefined,
+  writeActivityList: () => undefined,
+  writeDetailsTable: (...args: unknown[]) => writePdfDetailsTableMock(...args),
+  writeHeading: () => undefined,
+  writeReportHeader: () => undefined,
+  writeWrapped: () => undefined,
+}));
 
 // Imported after the mocks above so the module picks them up.
 import CsmChangeRequestDetailPage from "@features/csm-operations/pages/CsmChangeRequestDetailPage";
@@ -3698,6 +3717,58 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
     // The review it never had still reads Not applicable.
     expect(within(screen.getByText("Customer review required").parentElement!).getByText("Not applicable")).toBeInTheDocument();
     expect(stepLabels()).not.toContain("Customer Review");
+    view.unmount();
+  });
+
+  // The PDF says what the page says: "Not applicable" where a plain "No" would read as a customer who did not approve.
+  it.each([
+    ["no flag stored", false],
+    ["the customer-approval flag stored", true],
+  ])("Export as PDF of a closed Emergency change with %s and no customer stage row reads Customer approved: Not applicable", async (_name, flag) => {
+    lcSeed("emergency", { approval: false, review: false }, { members: LC_MEMBERS });
+    lc.approvals = [{ ...lcStage("CAB Approval", "CAB", LC_CAB), status: "APPROVED", approvers: [{ id: LC_CAB.id, name: LC_CAB.name, status: "APPROVED" }] }];
+    lc.cr = { ...lc.cr, hasCustomerApproved: flag };
+    lcSetState("closed");
+    lcPublish();
+    const view = lcOpenAs(LC_CREATOR);
+    expect(within(screen.getByText("Customer approved").parentElement!).getByText("Not applicable")).toBeInTheDocument();
+
+    writePdfDetailsTableMock.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Export as PDF" }));
+    await waitFor(() => expect(writePdfDetailsTableMock).toHaveBeenCalledTimes(1));
+    const rows = writePdfDetailsTableMock.mock.calls[0]![1] as Array<{ label: string; value: string }>;
+    expect(rows.find((r) => r.label === "Customer approved")?.value).toBe("Not applicable");
+    view.unmount();
+  });
+
+  it("Export as PDF of an Emergency change that really has a Customer Approval stage row reads it as stored, and a Normal change still reads Yes / No", async () => {
+    lcSeed("emergency", { approval: true, review: false }, { members: LC_MEMBERS });
+    lc.approvals = [
+      { ...lcStage("ECAB Approval", "ECAB", LC_ECAB), status: "APPROVED", approvers: [{ id: LC_ECAB.id, name: LC_ECAB.name, status: "APPROVED" }] },
+      {
+        ...lcStage("Customer Approval", "Customer Group", LC_MEMBERS[0]!),
+        status: "APPROVED",
+        approvers: [{ id: LC_MEMBERS[0]!.id, name: LC_MEMBERS[0]!.name, status: "APPROVED" }],
+      },
+    ];
+    lc.cr = { ...lc.cr, hasCustomerApproved: true };
+    lcSetState("closed");
+    lcPublish();
+    let view = lcOpenAs(LC_CREATOR);
+    const exported = async (): Promise<string | undefined> => {
+      writePdfDetailsTableMock.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Export as PDF" }));
+      await waitFor(() => expect(writePdfDetailsTableMock).toHaveBeenCalledTimes(1));
+      return (writePdfDetailsTableMock.mock.calls[0]![1] as Array<{ label: string; value: string }>).find((r) => r.label === "Customer approved")?.value;
+    };
+    expect(await exported()).toBe("Yes");
+
+    lcSeed("normal");
+    lc.cr = { ...lc.cr, hasCustomerApproved: false };
+    lcSetState("closed");
+    lcPublish();
+    view = lcOpenAs(LC_CREATOR, view);
+    expect(await exported()).toBe("No");
     view.unmount();
   });
 

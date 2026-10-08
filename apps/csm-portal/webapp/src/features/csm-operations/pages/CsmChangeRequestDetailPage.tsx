@@ -540,7 +540,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
       const { generateChangeRequestReportPdf } = await import(
         "@features/csm-operations/utils/changeRequestReportPdf"
       );
-      generateChangeRequestReportPdf(cr, comments ?? []);
+      generateChangeRequestReportPdf(cr, comments ?? [], approvalsData?.approvals);
     } catch (err) {
       showError("Could not export this change request as a PDF. Please try again.", err);
     }

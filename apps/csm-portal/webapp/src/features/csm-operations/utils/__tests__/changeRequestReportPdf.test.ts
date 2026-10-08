@@ -48,9 +48,12 @@ const CR: BeChangeRequestDetail = {
   type: "normal",
 };
 
-function customerApprovedRow(overrides: Partial<BeChangeRequestDetail>): string | undefined {
+function customerApprovedRow(
+  overrides: Partial<BeChangeRequestDetail>,
+  approvals?: ReadonlyArray<{ stage: string }>,
+): string | undefined {
   writeDetailsTable.mockClear();
-  generateChangeRequestReportPdf({ ...CR, ...overrides }, []);
+  generateChangeRequestReportPdf({ ...CR, ...overrides }, [], approvals);
   const rows = writeDetailsTable.mock.calls[0]?.[1] as Array<{ label: string; value: string }> | undefined;
   return rows?.find((r) => r.label === "Customer approved")?.value;
 }
@@ -98,5 +101,45 @@ describe("generateChangeRequestReportPdf — the Customer approved row", () => {
 
   it("leaves the row out when the backend sent no flag at all", () => {
     expect(customerApprovedRow({})).toBeUndefined();
+    expect(customerApprovedRow({ type: "emergency", state: "closed" }, [])).toBeUndefined();
+  });
+});
+
+// An Emergency change acts without customer consent: the detail page reads "Not applicable" for its customer approval, so the
+// exported report must not say "No" (which reads as a customer who did not approve). Same rule: only the state and the stage
+// rows of that gate show the change went through it.
+describe("generateChangeRequestReportPdf — the Customer approved row of an Emergency change", () => {
+  const emergency: Partial<BeChangeRequestDetail> = { type: "emergency", state: "closed" };
+  const cabOnly = [{ stage: "CAB Approval" }];
+
+  it("reads Not applicable instead of No, as the detail page does", () => {
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: false }, cabOnly)).toBe("Not applicable");
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: false }, [])).toBe("Not applicable");
+  });
+
+  it("reads Not applicable, not Yes, when only a stored flag says the customer approved (a flag need not be the customer's answer)", () => {
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: true }, cabOnly)).toBe("Not applicable");
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: true }, [])).toBe("Not applicable");
+  });
+
+  it("reads as stored when a stage row of the gate exists (a change raised before the rule), or when the change sits in it", () => {
+    const withGate = [{ stage: "ECAB Approval" }, { stage: "Customer Approval" }];
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: true }, withGate)).toBe("Yes");
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: false }, withGate)).toBe("No");
+    expect(customerApprovedRow({ type: "emergency", state: "customer_approval", hasCustomerApproved: false }, cabOnly)).toBe("No");
+  });
+
+  it("says nothing when the stage rows are not loaded and only they could show the gate was passed", () => {
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: false }, undefined)).toBeUndefined();
+    expect(customerApprovedRow({ ...emergency, hasCustomerApproved: true }, undefined)).toBeUndefined();
+    // The state alone settles a change that sits in the gate.
+    expect(customerApprovedRow({ type: "emergency", state: "customer_approval", hasCustomerApproved: false }, undefined)).toBe("No");
+  });
+
+  it("leaves a Normal change as it was, with or without the stage rows", () => {
+    for (const approvals of [undefined, [], [{ stage: "CAB Approval" }]]) {
+      expect(customerApprovedRow({ type: "normal", state: "closed", hasCustomerApproved: false }, approvals)).toBe("No");
+      expect(customerApprovedRow({ type: "normal", state: "closed", hasCustomerApproved: true }, approvals)).toBe("Yes");
+    }
   });
 });

@@ -37,13 +37,15 @@ import {
   changeRequestImpactLabel,
   changeRequestStateColor,
   changeRequestStateLabel,
+  CUSTOMER_STEP_NOT_APPLICABLE,
   customerApprovedDisplay,
+  isCustomerStepNotApplicable,
 } from "@features/csm-operations/utils/changeRequests";
 import {
   hasDisplayableContent,
   preprocessCommentBodyHtml,
 } from "@features/csm-cases/utils/commentContent";
-import type { BeChangeRequestDetail } from "@api/backend/types";
+import type { BeChangeRequestApproval, BeChangeRequestDetail } from "@api/backend/types";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
 function formatDateTime(value?: string | null): string {
@@ -60,6 +62,27 @@ function writePlanSection(cur: PdfCursor, title: string, html?: string | null): 
 }
 
 /**
+ * The "Customer approved" row, or `null` when there is nothing to say. It reads what the detail page's own cell reads
+ * ({@link isCustomerStepNotApplicable}, {@link customerApprovedDisplay}), so an exported Emergency change, which acts
+ * without customer consent, says "Not applicable" where a plain "No" would read as a customer who did not approve. That
+ * rule needs the change's stage rows to tell an Emergency change that really went through the gate (it is shown as it is);
+ * without them (`approvals` undefined: not loaded) the report cannot say, so it leaves the row out rather than state a
+ * "Not applicable" it could not check.
+ */
+function customerApprovedRow(
+  cr: BeChangeRequestDetail,
+  approvals?: readonly Pick<BeChangeRequestApproval, "stage">[],
+): PdfDetailsRow | null {
+  if (cr.hasCustomerApproved === undefined) return null;
+  if (isCustomerStepNotApplicable(cr, "approval", approvals)) {
+    return approvals ? { label: "Customer approved", value: CUSTOMER_STEP_NOT_APPLICABLE } : null;
+  }
+  // "Proposed time accepted" for a change WSO2 scheduled by accepting the time the customer proposed
+  // (nothing is stamped as the customer's approval then, so a plain "No" would mislead).
+  return { label: "Customer approved", value: customerApprovedDisplay(cr) };
+}
+
+/**
  * Renders a change request plus its full comment trail as a standalone,
  * readable PDF report — see `caseReportPdf.ts`'s doc comment for the full
  * rationale (including why HTML content goes through
@@ -72,10 +95,14 @@ function writePlanSection(cur: PdfCursor, title: string, html?: string | null): 
  * (`CsmChangeRequestDetailPage.tsx` itself passes `audit={[]}` to its own
  * on-screen `CaseActivitiesFeed`) — this report is comments-only because
  * that's genuinely everything the API has for a change request's activity.
+ *
+ * `approvals` is `GET /change-requests/{id}/approvals` when loaded; the "Customer approved" row reads it
+ * (see {@link customerApprovedRow}).
  */
 export function generateChangeRequestReportPdf(
   cr: BeChangeRequestDetail,
   comments: CsmCaseComment[],
+  approvals?: readonly Pick<BeChangeRequestApproval, "stage">[],
 ): void {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const cur: PdfCursor = { doc, y: 0 };
@@ -113,11 +140,8 @@ export function generateChangeRequestReportPdf(
   if (cr.affectedComponentsText) {
     rows.push({ label: "Affected components", value: cr.affectedComponentsText });
   }
-  if (cr.hasCustomerApproved !== undefined) {
-    // "Proposed time accepted" for a change WSO2 scheduled by accepting the time the customer proposed
-    // (nothing is stamped as the customer's approval then, so a plain "No" would mislead).
-    rows.push({ label: "Customer approved", value: customerApprovedDisplay(cr) });
-  }
+  const approvedRow = customerApprovedRow(cr, approvals);
+  if (approvedRow) rows.push(approvedRow);
   if (cr.approvedBy?.name) {
     rows.push({
       label: "Approved by",
