@@ -17284,7 +17284,7 @@ components:
           description: >-
             Approval stage name: "Peer Approval", "CAB Approval" (a Normal change's second
             stage and an Emergency change's only one; a migrated Emergency
-            change's one unlabeled stage in the CAB group reads this way too), "Review",
+            change's unlabeled stage in the CAB group reads this way too), "Review",
             "ECAB Approval" (only on an Emergency change an earlier build created: no
             longer written, still shown and decided as the CAB stage), and -- for the change's customer group, while it is in
             customer_approval / customer_review -- "Customer Approval" /

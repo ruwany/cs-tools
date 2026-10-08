@@ -819,7 +819,7 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
 	}
 	// An Emergency change takes no customer step. The two customer boxes are not part of
-	// ServiceNow's create payload (this data source would drop them), but the refusal is
+	// the previous system's create payload (this data source would drop them), but the refusal is
 	// the same on every create path rather than a request that is accepted and ignored.
 	if err := repository.ValidateCreateChangeRequestCustomerGates(req.Type, req.CustomerApprovalRequired, req.CustomerReviewRequired); err != nil {
 		return domain.CreateChangeRequestResponse{}, err

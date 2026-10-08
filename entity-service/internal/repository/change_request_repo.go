@@ -2060,7 +2060,7 @@ var (
 	// changeRequestEmergencyCABCheckpoint is an Emergency change's ONLY stage (no
 	// peer approval, so it sits at position 0): the same "CAB Approval" stage, in the
 	// same group, as a Normal change's second one -- the previous system has no Emergency CAB,
-	// and an Emergency change migrated from it has exactly this one stage. Entered by
+	// and a migrated Emergency change can have just this one stage. Entered by
 	// Request Approval (state Authorize); approving it moves the change to Scheduled.
 	changeRequestEmergencyCABCheckpoint = changeRequestApprovalCheckpoint{Position: 0, Label: approvalStageLabelCAB, Pool: poolNamedGroup, GroupName: domain.CABApprovalGroupName}
 	// changeRequestReviewCheckpoint is the third stage of a Normal change

@@ -3352,7 +3352,7 @@ offered states are filtered the same way).
   * *CAB Approval* — the one group (`CAB Approval`) of **both** the Normal change's
     second stage, **right after** peer approval, and the Emergency change's ONLY
     stage (the previous system has no Emergency CAB: an Emergency change is approved by the
-    same CAB group, and a migrated Emergency change has exactly that one stage and
+    same CAB group, and a migrated Emergency change can have just that one stage and
     no Peer stage). For Normal it is provisioned inside the peer-approval decision's
     transaction; if it cannot be (nobody eligible) the peer decision is **rolled
     back** with a 400 rather than stranding the change in Authorize. For Emergency
@@ -3523,8 +3523,8 @@ offered states are filtered the same way).
 
 The previous system has **no Emergency CAB** (and no "ECAB Approval" group). An Emergency change there is
 `New → Request Approval → Authorize → Scheduled`, approved by the same **`CAB Approval`** group a
-Normal change's second stage is, with no Peer / Assess stage; a change migrated from the previous system has
-exactly that one stage (no label, group `CAB Approval`, position 0). An earlier build of this service
+Normal change's second stage is, with no Peer / Assess stage; a change migrated from the previous system can have
+just that one stage (no label, group `CAB Approval`, position 0). An earlier build of this service
 invented an "ECAB Approval" stage in a group of its own; that is gone.
 
 * **The flow.** `changeRequestFlowForModel("EMERGENCY")` → Request Approval writes `authorize` and
@@ -3539,8 +3539,9 @@ invented an "ECAB Approval" stage in a group of its own; that is gone.
   (`isEmergencyModel`, `effectiveChangeModel` -- the type the change will have once a PATCH is written).
   Every place that routes on it: Request Approval's flow, the decision cascade, the customer gates
   (below), `runtimeApprovalStageKind` (an Emergency change in Authorize has no peer stage, so a stage
-  on it is the CAB's), the approvals read's display, `provisionCustomerStage`, the GitHub sync's state
-  writer and the detail's `legalNextStates`.
+  on it is the CAB's), the approvals read's display, the GitHub sync's state writer and the detail's
+  `legalNextStates`. `provisionCustomerStage` is the one place that deliberately does **not** look at the
+  type (see "ALREADY in a customer state" below).
 * **Historic `ECAB Approval` stages (an in-flight Emergency change from before this change, on a
   development database).** The label is **not written any more but is still recognised**
   (`approvalStageLabelHistoricECAB`, `classifyApprovalStage`): such a stage is **shown under the label it
@@ -3595,7 +3596,7 @@ invented an "ECAB Approval" stage in a group of its own; that is gone.
     `..._MigratedEmergencyInACustomerStateIsAnswerable`.
   * **Clone / duplicate** is the webapp prefilling the create form from a change; there is no clone
     endpoint here. An Emergency clone cannot carry a ticked box because the create refuses one.
-* **A migrated Emergency change** (one unlabeled stage in the CAB group at position 0, `raw_status` and approver
+* **A migrated Emergency change of that shape** (one unlabeled stage in the CAB group at position 0, `raw_status` and approver
   `state` in the sync's UPPER_SNAKE spelling, the sync's `is_customer_*_required` possibly set, our own columns
   false) **decides, schedules and displays as the CAB stage**: `runtimeApprovalStageKind` reads it as CAB by its
   group, `changeRequestApprovalStageLabel` names it `CAB Approval` (not the positional `Assess`),
@@ -3644,8 +3645,8 @@ A stage with none is read as the first of these that applies, **and the result c
 the state it is decided in** (`approvalStageDecidableState`: Peer in Assess, CAB in
 Authorize), otherwise it is `stageKindOther`:
 
-1. its own assignment group: the group named `CAB Approval` -> CAB (a migrated
-   Emergency change's one stage reads this way: no label, in the CAB group, at position 0);
+1. its own assignment group: the group named `CAB Approval` -> CAB (the stage of a migrated
+   Emergency change of that shape reads this way: no label, in the CAB group, at position 0);
 2. an Emergency change in Authorize has no peer stage -> CAB;
 3. the positional guess (0 Peer, 1 CAB).
 

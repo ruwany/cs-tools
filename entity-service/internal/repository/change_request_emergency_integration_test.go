@@ -36,9 +36,9 @@ import (
 //
 //   - changes created here: the two customer boxes are refused (create, PATCH, re-type);
 //   - changes that already exist -- a "legacy" row from before the rule, a MIGRATED
-//     one (whose requirement flags is_customer_*_required are the sync's, and whose single
-//     stage carries no label), a row an earlier build gave an "ECAB Approval" stage: the flow
-//     ignores whatever boxes they hold, decides their one stage as the CAB's, and never
+//     one (whose requirement flags is_customer_*_required are the sync's, and whose stage
+//     can carry no label), a row an earlier build gave an "ECAB Approval" stage: the flow
+//     ignores whatever boxes they hold, decides a stage like that as the CAB's, and never
 //     provisions a customer stage for them.
 
 const emergencyMsgPrefix = "Emergency changes proceed without customer consent, so customer approval and customer review cannot be required"
@@ -543,16 +543,16 @@ func TestChangeRequestEmergencyIntegration_ResendingCustomerReviewIsANoOp(t *tes
 	}
 }
 
-// A MIGRATED Emergency change that is sitting in a customer state: the previous system itself asked the
-// customer group (an UNLABELED stage in customer_group_id, EXTERNAL approvers), our own boxes
-// are false and the sync's requirement flags may be set. It is not stranded: it reads
+// A MIGRATED Emergency change that is sitting in a customer state, of the shape where the previous system
+// itself asked the customer group (an UNLABELED stage in customer_group_id, EXTERNAL approvers): our own
+// boxes are false and the sync's requirement flags may be set. It is not stranded: it reads
 // customerCanAnswer true for the contacts, the customer's first act gives it the stage this
 // service's flow answers on, and the answer moves it -- Customer Approval to Scheduled, Customer
 // Review to Closed -- exactly as on a Normal change in the same shape. A Re-schedule re-asks
 // them, and the sync's flags are never written by any of it.
 func TestChangeRequestEmergencyIntegration_MigratedEmergencyInACustomerStateIsAnswerable(t *testing.T) {
-	// syncFlags: the sync's two requirement flags are set (they are, on the migrated rows that have a
-	// customer step at all). A row whose flag is already set cannot be given the opposite answer
+	// syncFlags: whether the sync's two requirement flags are set (a migrated row can carry them). A
+	// row whose flag is already set cannot be given the opposite answer
 	// (the lock on isCustomerApproved / isCustomerReviewed), so the rejection cases leave them off.
 	migrated := func(t *testing.T, state string, syncFlags bool) (*crFlow, string) {
 		f := newCustomerGroupFlow(t)
@@ -716,8 +716,8 @@ func TestChangeRequestEmergencyIntegration_MigratedEmergencyFollowsTheProposedTi
 	})
 }
 
-// A MIGRATED Emergency change (csm-sync-service mirrors it): ONE stage, no label, in the CAB group at
-// position 0, UPPER_SNAKE raw_status and approver states, the sync's customer flags ticked, our own boxes
+// A MIGRATED Emergency change of the shape csm-sync-service writes: one stage, no label, in the CAB group
+// at position 0, UPPER_SNAKE raw_status and approver states, the sync's customer flags ticked, our own boxes
 // false. It displays as the CAB stage, its approver can decide it, deciding schedules it, and the sync's
 // flags are neither read as a requirement nor ever written.
 func TestChangeRequestEmergencyIntegration_MigratedEmergencyDisplaysDecidesAndSchedulesAsCAB(t *testing.T) {
@@ -779,7 +779,7 @@ func TestChangeRequestEmergencyIntegration_MigratedEmergencyDisplaysDecidesAndSc
 	}
 }
 
-// What a migrated Emergency change that is long finished reads like: the CAB stage, approved, with its
+// What a finished migrated Emergency change of that shape reads like: the CAB stage, approved, with its
 // sync-shaped approver states; nothing can be decided on it. The same rows on a Normal change keep
 // their positional name.
 func TestChangeRequestEmergencyIntegration_AFinishedMigratedEmergencyStillReadsAsCAB(t *testing.T) {

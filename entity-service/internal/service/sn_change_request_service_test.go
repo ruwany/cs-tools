@@ -661,9 +661,9 @@ func TestSNChangeRequestService_CreateChangeRequest_RequiresType(t *testing.T) {
 }
 
 // TestSNChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefused: an
-// Emergency change takes no customer step, so the ServiceNow-only data source refuses a
-// create that ticks either box as the PostgreSQL ones do (before ServiceNow is called: the
-// client here is nil), rather than accepting and dropping it.
+// Emergency change takes no customer step, so the previous-system-only data source refuses a
+// create that ticks either box as the PostgreSQL ones do (before the previous system is called:
+// the client here is nil), rather than accepting and dropping it.
 func TestSNChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefused(t *testing.T) {
 	svc := NewServiceNowChangeRequestService(nil)
 	emergency := domain.ChangeRequestTypeEmergency

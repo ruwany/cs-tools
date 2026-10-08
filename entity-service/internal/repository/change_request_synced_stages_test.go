@@ -56,8 +56,8 @@ func TestRuntimeApprovalStageKind(t *testing.T) {
 		{"CAB group name is exact", nil, str("CAB Approval Board"), 5, "NORMAL", "AUTHORIZE", stageKindOther},
 		{"another group falls back to the position", nil, str("Devops"), 1, "NORMAL", "AUTHORIZE", stageKindCAB},
 		// An Emergency change in Authorize has no peer stage, so a stage on it can only be the
-		// CAB's -- and the migrated shape is that one stage in the CAB group at position 0.
-		{"Emergency in Authorize, CAB group, position 0 (the migrated shape)", nil, str("CAB Approval"), 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
+		// CAB's -- and a migrated Emergency change can have just that one stage in the CAB group at position 0.
+		{"Emergency in Authorize, CAB group, position 0 (a migrated shape)", nil, str("CAB Approval"), 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
 		{"Emergency in Authorize, CAB group, any position", nil, str("CAB Approval"), 3, "EMERGENCY", "AUTHORIZE", stageKindCAB},
 		{"Emergency in Authorize, position 0, no label", nil, nil, 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
 		{"Emergency in Authorize, position 2, no label", nil, nil, 2, "EMERGENCY", "AUTHORIZE", stageKindCAB},

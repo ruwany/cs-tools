@@ -37,8 +37,8 @@ import (
 // soon as possible").
 //
 // The previous system has no Emergency CAB. An Emergency change is approved by the same
-// "CAB Approval" group a Normal change's second stage is, and an Emergency change
-// migrated from the previous system has exactly that one stage (no Peer stage). An earlier
+// "CAB Approval" group a Normal change's second stage is, and a migrated Emergency change
+// can have just that one stage (no Peer stage). An earlier
 // build wrote a stage labelled "ECAB Approval" for Emergency changes; that label
 // is no longer written, but a stage that still carries it is shown under it and is
 // decided as the CAB stage (approvalStageLabelHistoricECAB):
@@ -297,8 +297,8 @@ func classifyApprovalStage(label *string, position int) approvalStageKind {
 //
 //  1. the stage's own assignment group names it: the "CAB Approval" group makes
 //     it a CAB stage -- whatever the change's type and whatever its position, which
-//     is how a migrated Emergency change's one stage (no Peer stage, in
-//     the CAB group, at position 0) reads;
+//     is how the stage of a migrated Emergency change of that shape (no Peer stage,
+//     in the CAB group, at position 0) reads;
 //  2. failing that, an Emergency change in Authorize has no peer stage, so a stage
 //     on it can only be the CAB's;
 //  3. failing that, the historical positional guess (0 = Peer, 1 = CAB; see
@@ -663,8 +663,7 @@ func resolvePeerPool(ctx context.Context, q crQuerier, assignedTeamID *string, c
 	if len(why) > 0 {
 		msg += " (" + strings.Join(why, "; ") + ")"
 	}
-	// A fallback group nobody has put members in is the usual reason on a synced
-	// environment: say whose job that is.
+	// A fallback group nobody has put members in can be the reason: say whose job that is.
 	if !exists || len(members) == 0 {
 		msg += ": " + notMirroredGroupNote(domain.PeerApprovalFallbackGroupName)
 	}

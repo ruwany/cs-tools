@@ -328,8 +328,8 @@ func TestChangeRequestApprovalStageLabel_Emergency(t *testing.T) {
 	}
 }
 
-// The whole approvals read of a migrated Emergency change: ONE unlabeled stage in the CAB
-// group at position 0, UPPER_SNAKE approver states. It reads as the CAB stage, with the
+// The whole approvals read of a migrated Emergency change of that shape: one unlabeled stage in
+// the CAB group at position 0, UPPER_SNAKE approver states. It reads as the CAB stage, with the
 // stage status derived from its approvers like any other.
 func TestBuildChangeRequestApprovals_MigratedEmergencyStage(t *testing.T) {
 	str := func(s string) *string { return &s }
