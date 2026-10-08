@@ -1144,6 +1144,31 @@ test.describe("change request approval flow — Emergency", () => {
   });
 });
 
+test.describe("change request approval flow — a stored customer-approval flag is not the customer's approval", () => {
+  test("an Emergency change whose flag is stored with no customer stage behind it reads Not applicable and has no Customer Approval on the line", async ({ page }) => {
+    test.setTimeout(90_000);
+    const api = await installFakeChangeRequestApi(page, "emergency", FAKE_CREATOR, {}, ON_ACME);
+    const detail = new ChangeRequestDetailPage(page);
+    const none = { approval: false, review: false };
+
+    await openDetail(detail);
+    await detail.requestApproval();
+    api.setViewer(FAKE_CAB);
+    await page.reload();
+    await detail.approve("Cam Cab");
+    await expect(detail.currentStep()).toContainText("Scheduled");
+
+    // The flag alone, as a requirement could leave it: nobody was asked, there is no customer stage.
+    api.storeCustomerApprovedFlag(true);
+    await page.reload();
+    expect(api.stages().map((st) => st.stage)).toEqual(["CAB Approval"]);
+    await expect(detail.flagValue("Customer approved")).toHaveText("Not applicable");
+    await expect(detail.flagValue("Customer approval required")).toHaveText("Not applicable");
+    await expectStages(detail, "d n d p c p p p n p n", none);
+    await expect(page.getByText("Customer Approval", { exact: true })).toHaveCount(0);
+  });
+});
+
 // Retired: "Emergency with Customer Approval" (ECAB approval stops at Customer Approval; the customer's answer schedules it).
 // An Emergency change acts without the customer's consent: even on a project with registered contacts nobody is asked.
 test.describe("change request approval flow — an Emergency change never reaches a customer state", () => {

@@ -638,6 +638,11 @@ export interface FakeChangeRequestApi {
   addInternalRequestedRow(): void;
   /** The customer's approval outcome stamp (`hasCustomerApproved`), as the fake holds it. */
   customerApproved(): boolean;
+  /**
+   * Stores the outcome flag (`hasCustomerApproved`) on its own, with no customer answer and no customer stage behind it: a stored flag
+   * need not be the customer's answer (it can be a requirement). The open page is not refreshed.
+   */
+  storeCustomerApprovedFlag(value: boolean): void;
 }
 
 const CUSTOMER_STAGES = ["Customer Approval", "Customer Review"];
@@ -1740,6 +1745,9 @@ export async function installFakeChangeRequestApi(
       ];
     },
     customerApproved: () => customerApproved,
+    storeCustomerApprovedFlag: (value) => {
+      customerApproved = value;
+    },
     syncCustomers: () => {
       syncCustomerStage();
       reconcile();
