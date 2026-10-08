@@ -185,7 +185,10 @@ describe("ChangeRequestRescheduleDialog", () => {
       expect(screen.getByText(/Keep the current time to decline the proposal\. No CAB approval is needed\./)).toBeInTheDocument();
       // Nothing of the plain Re-schedule hint, and nothing of the old CAB loop.
       expect(screen.queryByText(/change the planned start or end to re-schedule/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Authorize|goes back/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Authorize|ECAB|goes back/)).not.toBeInTheDocument();
+      // CAB is named once, to say it is not involved: take that sentence away and no mention of it (ECAB included) is left.
+      const cabMentions = screen.queryAllByText(/CAB/).map((el) => (el.textContent ?? "").replace(/No CAB approval is needed\./g, ""));
+      expect(cabMentions.filter((text) => /CAB/.test(text))).toEqual([]);
     });
 
     it("is prefilled with the PLANNED window, not the customer's, and offers to decline as it stands", () => {
