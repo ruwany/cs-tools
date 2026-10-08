@@ -1557,9 +1557,14 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 			}
 		case "customer_review":
 			if isEmergencyModel(effectiveChangeModel(gates.model, req.Type)) {
-				return "", &apierror.ValidationError{Msg: "state \"customer_review\" cannot be set: " + emergencyNoCustomerConsentMsg + "; close it from review instead"}
-			}
-			if !reviewRequired {
+				// An Emergency change is never SENT to Customer Review. One that is already
+				// there (a row from before the rule, or a migrated one) that only names the
+				// state again is not being sent anywhere: checkStaffStateRequest let the
+				// resend through, and it is the no-op it is for any other change.
+				if gates.state != crStateCustomerReview {
+					return "", &apierror.ValidationError{Msg: "state \"customer_review\" cannot be set: " + emergencyNoCustomerConsentMsg + "; close it from review instead"}
+				}
+			} else if !reviewRequired {
 				return "", &apierror.ValidationError{Msg: "state \"customer_review\" cannot be set: customer review is not required for this change request (customerReviewRequired is false); close it from review instead"}
 			}
 		case "closed":

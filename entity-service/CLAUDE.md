@@ -3566,7 +3566,9 @@ invented an "ECAB Approval" stage in a group of its own; that is gone.
     and a whole-form resend of it is accepted.
   * **Ignored by the flow** (`effectiveCustomerGates`: both read false for an Emergency change, the stored
     value left alone): CAB approval → `scheduled` (never `customer_approval`), Review → `closed` offered (never
-    `customer_review`; `{state: customer_review}` is refused with the Emergency reason), Request Approval needs
+    `customer_review`; `{state: customer_review}` is refused with the Emergency reason, unless the change is
+    already in Customer Review, where naming the state again moves nothing and is the usual no-op --
+    `..._ResendingCustomerReviewIsANoOp`), Request Approval needs
     no project for a ticked box, `legalNextStates`, the GitHub sync's `SetState`, the nobody-to-ask checks
     (but for the gate an Emergency change is already waiting at: next bullet).
     **Reads are untouched**: `customerApprovalRequired` / `customerReviewRequired` and the sync's

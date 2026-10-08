@@ -18,6 +18,7 @@ package repository_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -444,6 +445,100 @@ func TestChangeRequestEmergencyIntegration_RequesterChangeAtACustomerGateLeavesS
 			f.standInContact(crScopeProjectC)
 			id := fixture(f, domain.ChangeRequestTypeEmergency, state, true, true)
 			accepted(t, f, id, "of an Emergency change in "+state)
+		})
+	}
+}
+
+// An Emergency change is never SENT to Customer Review: naming customer_review from any state but
+// Customer Review itself is refused with the Emergency reason. A change that is ALREADY in Customer
+// Review (a row from before the rule, or a migrated one) and only names the state again is not being
+// sent anywhere: it is the no-op it is for a Normal change, not a 400 that tells staff to close the
+// change from a review it is not in.
+func TestChangeRequestEmergencyIntegration_ResendingCustomerReviewIsANoOp(t *testing.T) {
+	// shape is what a no-op resend must leave exactly as it was: the state, both of the sync's
+	// requirement flags, our own boxes, and every stage with every approver row.
+	shape := func(f *crFlow, id string) string {
+		sa, sr := f.syncFlags(id)
+		var oa, or bool
+		if err := f.scoped.QueryRow(f.sys, `SELECT customer_approval_required, customer_review_required FROM change_request WHERE id = $1`, id).Scan(&oa, &or); err != nil {
+			f.t.Fatalf("read our boxes: %v", err)
+		}
+		return fmt.Sprint(f.state(id), " sync=", sa, "/", sr, " ours=", oa, "/", or, " ", f.stages(id))
+	}
+	resend := func(t *testing.T, f *crFlow, id, when string) {
+		t.Helper()
+		before := shape(f, id)
+		if err := f.attemptState(id, "customer_review"); err != nil {
+			t.Fatalf("a resent customer_review %s: %v", when, err)
+		}
+		if after := shape(f, id); after != before {
+			t.Fatalf("a resent customer_review %s changed the change:\n  before: %s\n  after:  %s", when, before, after)
+		}
+	}
+
+	t.Run("a legacy Emergency change in Customer Review, with its live stage", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.createWithProject(domain.ChangeRequestTypeEmergency, sp(crScopeProjectA), false, false)
+		f.execSQL(`UPDATE change_request SET customer_approval_required = true, customer_review_required = true WHERE id = $1`, id)
+		f.setState(id, "CUSTOMER_REVIEW")
+		f.setProject(id, crScopeProjectA) // asks the contacts of a change in a customer state
+		if st := f.customerStages(id); len(st) != 1 {
+			t.Fatalf("%d customer stages for the Emergency change, want the one the contacts are asked in", len(st))
+		}
+		resend(t, f, id, "by an Emergency change in Customer Review")
+		f.expect(id, "after the resend", "CUSTOMER_REVIEW", "canceled") // the customer's request is live: staff may only cancel
+		f.wantCanAnswer(id, "after the resend", true, crScopeUserA1, crScopeUserA2)
+		if _, err := f.reviewAs(id, crScopeUserA1, true); err != nil {
+			t.Fatalf("the customer's review after the resend: %v", err)
+		}
+		f.expect(id, "after the customer's review", "CLOSED")
+	})
+	t.Run("a migrated Emergency change in Customer Review", func(t *testing.T) {
+		// A row of the shape the sync writes: its requirement flags set, our boxes false, an
+		// UNLABELED stage in the customer group asking Alice and Bob. Naming the state is accepted
+		// and the change stays where it is, with the sync's flags left untouched. (Like restating
+		// the project, the resend asks the contacts through provisionCustomerStage, which this
+		// test leaves unasserted: the stage a row of this shape is asked in is another matter.)
+		f := newCustomerGroupFlow(t)
+		id := f.migratedInCustomerApproval()
+		f.execSQL(`UPDATE change_request SET change_model = 'EMERGENCY', is_customer_approval_required = true,
+		                  is_customer_review_required = true WHERE id = $1`, id)
+		f.setState(id, "CUSTOMER_REVIEW")
+		syncA, syncR := f.syncFlags(id)
+		if err := f.attemptState(id, "customer_review"); err != nil {
+			t.Fatalf("a resent customer_review by a migrated Emergency change in Customer Review: %v", err)
+		}
+		if got := f.state(id); got != "CUSTOMER_REVIEW" {
+			t.Fatalf("state after the resend = %q, want CUSTOMER_REVIEW", got)
+		}
+		if a, r := f.syncFlags(id); a != syncA || r != syncR {
+			t.Fatalf("the sync's flags after the resend = %v/%v, want them untouched (%v/%v)", a, r, syncA, syncR)
+		}
+	})
+	t.Run("the control: a Normal change with the review box ticked", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), false, true)
+		f.setState(id, "CUSTOMER_REVIEW")
+		f.setProject(id, crScopeProjectA)
+		resend(t, f, id, "by a Normal change in Customer Review")
+		f.expect(id, "after the resend", "CUSTOMER_REVIEW", "canceled")
+	})
+
+	// Not in Customer Review, the Emergency change is still refused with the Emergency reason,
+	// and nothing is written.
+	for _, state := range []string{"REVIEW", "CUSTOMER_APPROVAL"} {
+		state := state
+		t.Run("naming it from "+state+" is still refused", func(t *testing.T) {
+			f := newCustomerGroupFlow(t)
+			id := f.createWithProject(domain.ChangeRequestTypeEmergency, sp(crScopeProjectA), false, false)
+			f.execSQL(`UPDATE change_request SET customer_approval_required = true, customer_review_required = true WHERE id = $1`, id)
+			f.setPlanned(id, rsStart1, rsEnd1)
+			f.setState(id, state)
+			f.wantValidationRefusal("customer_review named by an Emergency change in "+state, id, "customer_review",
+				`state "customer_review" cannot be set: `+emergencyMsgPrefix+"; close it from review instead")
+			if got := f.state(id); got != state {
+				t.Fatalf("state = %q after the refusal, want %q", got, state)
+			}
 		})
 	}
 }
