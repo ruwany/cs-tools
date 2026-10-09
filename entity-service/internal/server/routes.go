@@ -197,10 +197,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	// Also constructed for DataSourcePostgresServiceNowDualWrite: that mode's
 	// active services stay Postgres-backed (see the case wiring below), but
-	// its best-effort ServiceNow mirror writes still need this client.
-	// config.Validate requires the same four credentials for both modes.
-	// Built here, ahead of the GitHub sync, because that sync's state writes
-	// are mirrored too (snChangeRequestMirrorSvc below).
+	// its best-effort mirror writes to the previous system still need this
+	// client. config.Validate requires the same four credentials for both
+	// modes. Built here, ahead of the GitHub sync, because that sync's state
+	// writes are mirrored too (snChangeRequestMirrorSvc below).
 	var serviceNowIntegrationServiceClient *integrationservice.Client
 	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
 		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
@@ -223,7 +223,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// entity (project) needed the same instance, and again ahead of the
 	// GitHub sync.
 	//
-	// snChangeRequestMirrorSvc is the ServiceNow-backed change request
+	// snChangeRequestMirrorSvc is the previous system's change request
 	// service the dual-write mode mirrors change request writes onto
 	// (CreateChangeRequest / PatchChangeRequest / DecideChangeRequestApproval
 	// are the only methods of it ever called); it is never the active
@@ -1075,7 +1075,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Pilot extension: change request CREATE (ServiceNow-first,
 		// synchronous -- see changeRequestService.createChangeRequestSNFirst's
 		// own doc comment), PatchChangeRequest's best-effort asynchronous
-		// ServiceNow mirror write, DecideChangeRequestApproval's
+		// mirror write to the previous system, DecideChangeRequestApproval's
 		// best-effort asynchronous mirror write, and the mirror of every
 		// state move either commits (see those methods' own doc comments and
 		// changeRequestStateMirror). Reads (GetChangeRequest,
