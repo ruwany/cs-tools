@@ -1138,6 +1138,8 @@ var changeRequestPatchCRFKField = map[string]string{
 }
 
 // PatchChangeRequest implements ChangeRequestRepository.
+//
+// crvis: delegates to PatchChangeRequestStates, whose transaction runs requireVisibleChangeRequest first
 func (r *changeRequestRepo) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.ChangeRequest, error) {
 	cr, _, err := r.PatchChangeRequestStates(ctx, id, req, actorEmail)
 	return cr, err
@@ -3086,6 +3088,8 @@ func cancelSiblingApprovalStageApprovers(ctx context.Context, tx pgx.Tx, stageID
 // from. The cascade is keyed on both the state AND the kind of the decided
 // stage, so approving a CAB stage never advances a change that is somehow still
 // reading Assess.
+//
+// crvis: delegates to DecideChangeRequestApprovalStates, whose transaction runs requireVisibleChangeRequest first
 func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error) {
 	approvalID, _, err := r.DecideChangeRequestApprovalStates(ctx, id, approverUserID, decision, actorEmail)
 	return approvalID, err
