@@ -1106,11 +1106,13 @@ revisited.
   its priority and team. The same update sends `incident.acknowledged`/
   `incident.assigned` when it moves the incident out of NEW or sets an assignee
   (`publishIncidentStopSignals`).
-  `incident.created` has exactly one reaction on the receiving side now — a
-  Twilio voice call — not a Google Chat alert: `csm-notification-service`
-  removed that reaction entirely, per explicit product direction (an
-  incident pages on-call directly; a separate Chat post was redundant with
-  that). The escalation ladder's own `chat` channel is a different thing and
+  `incident.created` has two reactions on the receiving side: a Twilio voice
+  call and an "Incident Reported" Google Chat card in the assignment group's
+  space (`INCIDENT_CHAT_SPACES` there), for which the event also carries
+  `category`/`state`/`service`/`environment`; `incident.assigned` carries
+  `number`/`team`/`updatedBy` (the incident view's last updater) for the
+  threaded "Incident Acknowledged." reply. The consumer decodes strictly:
+  deploy csm-notification-service before this. The escalation ladder's own `chat` channel is a different thing and
   is unaffected: it posts a card per *rung* of a climbing escalation, not one
   on creation. This service does not build or send an `IncidentLink` at all —
   it stays strictly a publisher of the fact that an incident was created;
@@ -1895,6 +1897,55 @@ scanning the full ServiceNow-synced table the old, abandoned poll design
 choked on. Omitted (the default, and every other caller's behavior)
 means no filter, identical to this endpoint's original, unscoped shape.
 
+**`is_active` is now actually cleared when a clock finishes — a real,
+reported bug.** `SLAEngineRepository.CompleteClock`/`ReviseClocks` used to
+only ever set `is_active = TRUE`, at `RegisterClock`'s own INSERT, and never
+touch it again — so a clock that had genuinely, cleanly completed
+(`ACHIEVED`) or been cancelled kept reporting as "currently active" to this
+endpoint forever, which is exactly backwards from what `GET /sla-status`'s
+own contract ("every *currently-active* clock") and
+`csm-notification-service`'s `Reconcile` (which trusts this list to decide
+what still needs tracking) both assume. `CompleteClock` now sets
+`is_active = FALSE` alongside `stage = 'ACHIEVED'`, and `ReviseClocks`'
+cancellation branch does the same alongside `stage = 'CANCELLED'` —
+`BREACHED` is deliberately left `is_active = TRUE` (a clock whose
+wall-clock duration ran out without yet being satisfied is not finished —
+see `slaEngineOpenStageFilter`'s own doc comment), so this stays additive
+to, not a relaxation of, the terminal-stage distinctions this engine
+already makes everywhere else. Migration `0218` backfills every
+already-terminal `source='CSM'` row this fix's own `UPDATE` statements
+never touch (they only fire on a FUTURE `CompleteClock`/`ReviseClocks`
+call) — without it, every clock that had already completed before this
+shipped would stay stuck reporting "active" forever, including the exact
+rows a real, reported false-alert incident traced back to.
+
+**`GET /sla-status/clock-state` is a separate, dedicated endpoint for
+checking ONE specific clock's real state — deliberately not a filter on
+`GET /sla-status` itself.** Added for `csm-notification-service`'s own
+pre-alert verification: a confirmed, reproduced incident had its Redis-held
+completion state for a clock (its `alertedTier` cursor) silently fall out
+of sync with reality — the Redis write that should have recorded a clock
+finishing (on a case closing, or a qualifying comment) can fail with no
+retry (see that repo's own `CLAUDE.md`, "ApplyStateEffects") — so a wake
+entry scheduled when the clock was first registered could still fire a
+breach alert for a clock that had, in truth, already completed cleanly.
+An earlier version of this fix tried adding a `workItemId` filter to the
+existing active-only `GET /sla-status` instead, and a CodeRabbit review
+caught why that's insufficient: an **active-only** list can't tell "this
+clock genuinely, cleanly resolved" apart from "this clock was never
+registered here at all" (entity-service's own CSM registration is
+best-effort, on a different trigger than the Redis side) or "a severity
+revision replaced it with a brand new incarnation" — all three look
+identical to that caller ("not in the active list" / "some other active row
+of this type exists"), and treating either of the latter two as "resolved"
+would wrongly suppress a genuine alert. `domain.SLAClockState`
+(`Found`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists specifically
+to make those three distinguishable: `GetClockState` returns the single
+most recently-started row for `(workItemID, target[, source])`,
+**regardless of `is_active`**, with `Found=false` (every other field zero)
+when no row exists at all. `StartedOn` is what lets the caller compare
+clock *incarnations*, not just clock types, after a severity revision.
+
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
 of the same name/reasoning) — `AccessService.ResolveScope`'s scope must be
@@ -1938,7 +1989,7 @@ customer-frustration-detector alert route by real per-team/audience
 resolution this way — `case.created`/`case.acknowledged`/
 `case.severity_changed` all route to a single fixed
 `chataudience.IncidentMonitor` audience instead, with no team detection at
-all, and `incident.created` has no Chat reaction. `ProjectOnboardingStatus`
+all, and the `incident.*` cards route by assignment group (`INCIDENT_CHAT_SPACES`). `ProjectOnboardingStatus`
 is `project.onboarding_status`'s raw enum label (e.g. `"IN_PROGRESS"`), `""`
 when the work item has no project or the column is unset.
 `IsEvaluationAccount` is true when the project's `project_type` matches the
@@ -2414,6 +2465,38 @@ already use — no route path, request, or response shape changed.
   string with no name field on its wire contract at all — deliberately left
   as-is; the webapp only reads a comment's display name from `SearchComments`
   once the list is (re)fetched, never from the create response.
+- **Editing/deleting a comment, or viewing its edit history**
+  (`UpdateComment`, `DeleteComment`, `GetCommentEditHistory`) performs **no
+  author or role check of its own at all**. This service keeps no role table
+  for this decision — it used to additionally allow its own Postgres
+  `role.name = 'admin'` holders (the same mechanism "Time cards" above still
+  uses for `TransitionTimeCardState`), and after that a short-lived design
+  trusted a `csm-portal-backend`-asserted header, but both were dropped: the
+  decision belongs entirely to `csm-portal-backend`, which already resolves
+  the caller's real Asgardeo portal roles (`admin`, `comment_updater`) once
+  per request and now also calls `GetComment` (see below) to learn a
+  comment's author before deciding whether to proceed — a plain `cs_engineer`
+  may only touch their own comment, `admin`/`comment_updater` may touch any,
+  enforced entirely on that side. `resolveCommentActor` still runs on every
+  one of these calls, but only to resolve the caller's email for attribution
+  (`edited_by`/`deleted_by`), not for authorization. `commentAdminRoleName`'s
+  own Postgres `admin`-role lookup still exists and is unchanged, but only
+  backs `resolveCommentCallerVisibility` (`SearchComments`' soft-deleted-comment
+  display logic) — a separate, read-time concern from this write/history
+  path. **The route itself is `internalOnly`** (`routes.go`), unlike
+  `POST /comments`/`POST /comments/search` (open to any validated caller,
+  since customers post and read comments on their own cases): with no
+  check left inside the service, an external/customer caller could otherwise
+  reach any of these three directly with nothing but a valid token and act on
+  a comment they don't own, bypassing `csm-portal-backend` entirely —
+  `customer-portal-backend-v2` is confirmed to never call any of the three
+  (only create/search), so this closes that gap for free.
+- **`GET /comments/{id}`** returns a single comment by id, also with no
+  author/role check and also `internalOnly` for the same reason — it exists
+  purely so `csm-portal-backend` can look up a comment's author before
+  deciding whether to allow an edit/delete (see above); nothing it returns
+  isn't already visible to any internal caller who can see this comment at
+  all via `POST /comments/search`.
 - **Product vulnerabilities**: `SearchProductVulnerabilities`/
   `GetProductVulnerability`/`GetVulnerabilityMeta` are read-only queries
   against `product_vulnerability`, which mirrors ServiceNow's own
@@ -3039,11 +3122,16 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   Engagement") and the SLA clocks above. No event is published (there is no `case.type_changed`).
   A GitHub-linked service request still gets the one "record created" notice its insert
   trigger always sends.
-- **Known gap, not caused by the transfer:** `GetCaseByID` does not return `engagementType`
-  for any engagement on this data source (only the list search selects `eng.type`), so
-  anything keyed on it from the detail read, such as the Migration reminder wording of "Request
-  update", sees nothing for native and transferred Migration tickets alike. The stored type and
-  payment type are correct.
+- **`GetCaseByID` now returns `engagementType` too** (fixed; previously a known gap, not caused
+  by the transfer itself) — it used to select only the list search's own `eng.type` and leave
+  the detail read's `CaseView.EngagementType` nil, so anything keyed on it from the detail read
+  (the Migration reminder wording of "Request update") saw nothing for native and transferred
+  Migration tickets alike, even though the stored type and payment type were always correct.
+  `GetCaseByID` now joins `eng.type::TEXT` the same way `SearchCases` already did and lower-cases
+  it into `CaseView.EngagementType` identically (`"migration"`, not the raw `MIGRATION` enum
+  label) — `customer-portal`'s backend-v2 already maps that lowercase value through its own
+  `caseEngagementTypeRef` into a human `{id: "1", label: "Migration"}`, so no change was needed
+  on that side, only here.
 - Tests: `case_type_transfer_service_test.go` (validation rules, internal-only, ServiceNow
   inside the transaction and its refusal leaving nothing, ambiguous ServiceNow failures, SLA per
   direction), `case_type_transfer_repo_integration_test.go` (real Postgres as a non-superuser,
@@ -6306,6 +6394,29 @@ Fixed by matching `SearchCases`'s join type; `CaseView.DeploymentDetails`/
 `DeployedProductDetails` are already pointer fields, so this needed no
 domain/contract change, only nil-checks in the scan.
 
+## case search accountId filter: accepted by the parser, silently never applied by the repository
+
+Found live, from `apps/csm-portal/backend`, while verifying a new feature that filters
+`POST /cases/search` by `accountId`/`in` against this service running locally against a
+real copy of the database: the filter was accepted by `case_filters.go`'s parser (no
+400, a clean 200) but the result set was every case-like work item in the system
+(22,361 rows) rather than the one account's own (1,585, confirmed directly by SQL) —
+the filter was silently a no-op. Root cause: `caseFieldPredicates`
+(`internal/repository/case_field_predicates.go`) builds a SQL predicate for every field
+`case_filters.go` accepts except `accountId` — unlike the structurally identical
+`ProjectIDs`, there was never an `AccountIDs` case in that function at all, so parsing
+an `accountId` filter produced a `caseFieldSet` whose `AccountIDs` had nowhere to go.
+Fixed by adding an `AccountIDs []string` field plus its own predicate
+(`wi.account_id = ANY($N::uuid[])`, mirroring `ProjectIDs`'s exact shape) and wiring it
+into `caseFieldSet{...}`'s one production construction site in `case_repo.go`.
+
+This is a real, pre-existing data-isolation bug, not something the new feature
+introduced: any caller filtering a case search by `accountId` got every account's
+cases back, not just the one asked for. It was only caught because the new feature was
+verified against a real, locally-run instance of this service and real data, not a
+hand-rolled fake test double — a fake proves a caller's HTTP request is shaped
+correctly, never that the service receiving it actually applies the filter.
+
 ## Fixing user_repo.go's NULL-scan crash and user_type-casing bug
 
 `POST /users/search` failed on every call whose results included a user with
@@ -6348,15 +6459,12 @@ product, account, deployment, deployed_product, split across
 - **`product_version_repo.go`**: pure rename (`product_versions` →
   `product_version`, `created_at`/`updated_at` → `created_on`/`updated_on`).
   No other column was wrong.
-- **`deployment_repo.go`**: same rename, plus one semantic bug beyond
-  naming: `deployment.created_by` is a plain `VARCHAR` audit string (an
-  email, this codebase's own convention — see e.g. `commentService` writing
-  the caller's email into `comment.created_by`), never a UUID FK, so
-  `JOIN "user" u ON d.created_by = u.id` would either fail to type-check or
-  silently match nothing even after the table rename. Fixed by resolving
-  the creator via `LEFT JOIN "user" u ON LOWER(u.email) = LOWER(d.created_by)`
-  — `CreatedBy` comes back `nil` (not a fabricated `EntityRef` with an empty
-  id) when the email doesn't resolve to a known user.
+- **`deployment_repo.go`**: same rename. `DeploymentView` no longer carries
+  `createdBy`: `deployment.created_by` is a plain `VARCHAR` audit string (an
+  email) and `"user".email` is not unique, so the old
+  `LEFT JOIN "user" ON LOWER(email) = LOWER(created_by)` returned one row per
+  matching user and duplicated deployments in the list. The join and the field
+  were removed; no consumer read it.
 - **`deployed_product_repo.go`**: rename, plus `dp.product_version_id` →
   the real column `dp.version_id`. Also newly populates `Cores`/`TPS`/
   `Category` from `core_count`/`tps_count`/`product_category` — real columns
@@ -7220,7 +7328,15 @@ assignment group **changes to** a Special Ops group -- every team's `groupId` in
 which already claims those rows, publishes the alert (`WithSpecialOpsAlerts`, main.go) and
 acknowledges any other group as a no-op. A failed publish is retried and parked like the report
 flows. Payload: `events.IncidentSpecialOpsAlertPayload` (incident, service, product/team, both
-groups, who and when), keyed by the incident id. Off without the topic; unknown to the consumer
+groups, who and when), keyed by the incident id. `smeTeam` is the matched team's `smeTeam` from
+`SPECIALIST_HANDOFF_CONFIG` (the Team Schedule key of the SME rota Case Paging pages), omitted when
+the team names none. The team is found by the group the incident moved into; when two teams share
+that group, the alert takes the one the handoff's reason note names (`escalationTeam`, written in
+the same transaction as the move, read back by `SpecialOpsAlertSource.HandoffNote`), so the SME rota
+of the team picked in the dialog is paged; with no note naming one of them, the first (logged).
+A handoff needs an assignee: an unassigned incident is a 409 `incident_handoff_needs_assignee`
+(the assignee answers for the page to the SME on duty). `incident.assigned` carries `assignedOn`,
+which the SME page compares alerts against. Off without the topic; unknown to the consumer
 until it adds the type (`HandleShared` skips unknown types on sre-events).
 
 **`UpdateProblem`/`UpdateIncident` are also not
@@ -7786,17 +7902,15 @@ cannot drift:
 
 | Count | Made of | States (the project stats constants, passed in) |
 |---|---|---|
-| Outstanding | cases, service requests, engagements, security report analyses + change requests | cases: every state **but `CLOSED`**, an item with no state included (`caseStateClosed`; the dashboard tile's rule, `projectCaseStatsService`); change requests `crOutstandingStatesFor(scope)` (a customer's Authorize counts, staff's does not) |
+| Outstanding | cases, service requests, engagements, security report analyses + change requests | cases: every state **but `CLOSED`**, an item with no state of its own type left out (`caseStateClosed`; the dashboard tile's rule, `projectCaseStatsService`; see "Cards count what their lists show"); change requests `crOutstandingStatesFor(scope)` (a customer's Authorize counts, and so does a staff user's on the customer portal; staff anywhere else do not) |
 | Action Required | the same items waiting on the customer | `caseStatsActionRequiredStates` (Awaiting Info, Solution Proposed); change requests Customer Approval, Customer Review |
 | Active Chats | conversations | `conversationActiveStates` (OPEN, ACTIVE) |
 
-- **Outstanding is "not closed", not "in an open state".** `caseStatsOutstandingStates` (the list `GET
-  /projects/{id}/stats` uses for its per-type counts) leaves out a case-like work item whose extension row is
-  missing (it has no state), but the dashboard's Outstanding tile (`GET /projects/{id}/stats/cases`) counts it,
-  as every state except `CLOSED`. A first version of this used the list and put the list below the dashboard
-  for the same project (staging copy: 8 of the 12 heaviest projects, by exactly their state-less items; the
-  issue's own project read 88 against 109). Checked on that data: the list now equals the dashboard's own
-  repository functions for all 12, and for a real customer's three projects.
+- **Outstanding is "not closed", not "in an open state".** A state added to the enum is outstanding without
+  being listed anywhere. It counts only an item that has a state **of its own type** (below), the same
+  definition as the dashboard's Outstanding tile (`GET /projects/{id}/stats/cases`). Until digiops-cs#3390 this
+  line said the opposite (a state-less item counted, to match the tile, which then read higher than the list
+  behind it); the tile, the dashboard chart, the Support card and this list now all leave it out.
 - **Announcements are not counted**, as on the dashboard (its tiles combine case, service request,
   engagement and security report analysis only).
 - **Change requests apply the customer visibility rule** (`CRVisibility.andClause`, see "Customer visibility
@@ -7848,11 +7962,66 @@ cannot drift:
 - Tests: `TestGlobalSearch_*Count*` (service: the states handed over, per caller, not asked for a cases-only
   search, a failure leaves the list intact, a request that ends during the lookup fails), `TestProjectActivityCountsIntegration` (real Postgres, run as the
   non-superuser application role and as a superuser; `CASE_STATS_TEST_DSN`: staff and customer callers,
-  strict and legacy change request visibility, announcements excluded, an item with no state counted,
+  strict and legacy change request visibility, announcements excluded, an item with no state of its own type (none at all, or an engagement's row under a CASE) left out,
   another customer's project, the search's own ids keying the result, and a partner on 12 projects: chunked and
   narrowed gives the same numbers as un-narrowed, a project they are not a member of stays at zero even inside a
   chunk of members, and the narrowed list does not outlive the call on a reused connection). The webapp's export:
   `projectsExport.test.ts`.
+
+## Cards count what their lists show (digiops-cs#3390)
+
+The customer portal's dashboard and Support cards (Outstanding, Closed (Last 30d), Active Chats) each link to a
+list and a customer compares the two. They are built from different code (the stats repositories for the card,
+`SearchCases` / `SearchConversations` with the filters the portal sends for the list), and on a Managed Cloud
+project of the dev database (Customer 3 Project) they disagreed three ways: Outstanding 602 against 578, Closed
+(Last 30d) 30 against 23, Active Chats 0 against 281.
+
+- **State of its own type: `caseLikeOwnStateColumn`.** A list filtered by state matches each type in its own
+  extension table (`caseLikeStateLookupTables`), while `caseLikeStateColumn` COALESCEs the five tables. Synced data
+  has work items the two read differently: 830 of 11,977 `CASE` rows have a state in no extension table at all, 63 are typed
+  `CASE` with a state only in another type's table (on dev, the 24 behind the 602 / 578 gap: 21 and 3). Neither shows in
+  any list filtered by state, so every count a card shows reads the state through `caseLikeOwnStateColumn`:
+  `StateSeverityCounts`, `StateEngagementTypeCounts`, `ResolvedBuckets` (`projectCaseStatsRepo`), `OutstandingCounts`
+  (`GET /projects/{id}/stats`' per-type counts) and `ProjectActivityCounts` (the project list). Such a row comes back
+  with an empty `State`; `projectCaseStatsService` keeps it in `totalCount` and leaves it out of
+  `activeCount` / `outstandingCount` (`State != "" && != CLOSED`), so the dashboard's Outstanding card, its
+  Outstanding Support Cases chart (which has always skipped it: no severity) and the list agree. Not changed:
+  `ClosedByCreatedWindow` (a change-rate figure with no list) and `SLAStatusInputs`.
+- **`closedOn` filter reads the extension table of the item's own type.** `buildCaseSearchWhere` used to match
+  `"case".closed_on` only, so the Closed (Last 30d) list never found a closed service request or engagement although
+  the card (`ResolvedBuckets`) counts them. Both now use `caseLikeOwnClosedOnColumn` (the closure time of the table
+  of `wi.type`, like `caseLikeOwnStateColumn`), so a CASE-typed item whose only extension row is an engagement's does
+  not match on the engagement's date. `GetCaseByID` keeps `caseLikeClosedOnColumn` (it shows whatever closure time
+  the item has). `resolvedOn`
+  is still `"case".resolved_on` only (nothing links a card to it). Same plan cost as before on the staging-like copy
+  (the extension joins were already in the query): 55-69 ms for the heaviest project's closed-in-30-days count,
+  either way.
+- **Change requests for staff on the customer portal.** `crOutstandingStatesFor` counts Authorize as outstanding for
+  a customer only, but the customer portal's change request list shows Authorize to a staff user as well, so a staff
+  account saw 7 on the Outstanding card and 16 in the list. `AccessScope.ViaCustomerPortal` (set in `ResolveScope` for
+  the customer portal backend's client id, whoever the user is; the data scope is unchanged) makes the card count
+  Authorize for staff on that path too. Staff on the CSM portal, and machine clients, keep the ServiceNow grouping.
+  Without `CUSTOMER_PORTAL_BACKEND_CLIENT_ID` configured the flag is never set (no change). Tests:
+  `TestAccessService_ResolveScope_ViaCustomerPortal`,
+  `TestProjectChangeRequestStats_AuthorizeIsOutstandingForStaffOnTheCustomerPortal`.
+- **Test:** `TestCardsAgreeWithTheirListsIntegration` (real Postgres, `CASE_STATS_TEST_DSN`) seeds the three kinds of
+  row and asserts card = list for case, service request and engagement; against the old code it fails on all three.
+  `TestGetProjectCaseStats_RowsWithoutAStateAreNotOutstanding` is the service half.
+- **Active Chats** is the customer portal backend's: it read the Active count by ServiceNow's numeric id out of a
+  state breakdown whose ids are raw enum labels on this data source, so the card was absent/0 (see
+  `apps/customer-portal/backend-v2/CLAUDE.md`). entity-service's `activeCount` here is Open + Active; the portal
+  card and its list use the Active state alone.
+- **Resolved via Chat (Last 30d) is really 30 days.** A conversation has no resolved-on column, so "resolved in the
+  last 30 days" is state `RESOLVED` and `work_item.updated_on` within 30 days (a resolved chat is rarely touched
+  again). The card is `ProjectConversationStatsResponse.ResolvedPastThirtyDays` (`ResolvedConversationsPastThirtyDays`,
+  Postgres only; a pointer, absent on ServiceNow and on older builds, where the portal backend falls back to the
+  Resolved entry of `stateCount`, which has no period). The list is `SearchConversations` with
+  `filters.startUpdatedDate` / `endUpdatedDate` (inclusive; an end before the start is a 400; the ServiceNow-backed
+  search does not forward them). The customer portal's list sends only the start. Test:
+  `TestConversationResolvedWindowIntegration`.
+- **Deploy:** entity-service first (card counts, the closed-date filter, the 30-day figure and filter), then the
+  customer portal backend (Active Chats, Resolved via Chat), then the webapp (the list's window). Entity-service
+  rejects unknown request fields, so the backend must not go out before it. No migration.
 
 ## Call requests and the service-request catalog (migrations 000067-000072)
 
@@ -8323,6 +8492,60 @@ only records that publishing happened, by whom, and when. The actual fan-out
 from before this entity existed; there is deliberately no persisted
 per-project delivery ledger here either — that belongs to a future batch
 entity, not this one.
+
+## POST /announcements/registry/rows: the grouped registry, paged in SQL
+
+The CSM announcement registry shows one row per published announcement request (a "batch") plus
+one row per announcement case no published request lists. `POST /announcements/registry/cases`
+returns every matching case so the portal backend can group them itself, which needs a row cap
+(`maxAnnouncementRegistryRows`, 10,000): with no filter the default view exceeds it and the read
+fails with a 400. `POST /announcements/registry/rows` does the grouping, ordering and pagination
+in one SQL statement instead, so **no cap applies**, and the registry list should read it.
+The cases route is unchanged and stays for callers that still want the flat case list.
+
+Internal callers only (`internalOnly` on the route plus `RequireInternalCaller` in the service),
+registered on the Postgres data source only, and read through `repository.Scoped` like the cases
+route. Request: the `POST /cases/search` body; `type` is forced to announcement, `anyOf` is
+rejected, `pagination` applies to the grouped rows (`normalizePagination`: default 20, max 50).
+Response: `{rows, total, limit, offset, hasMore}`; `total` counts rows, not cases.
+
+Rules the query implements (all in `announcement_registry_repo.go`):
+
+- A case belongs to a batch when its id is in `published_case_ids` (JSONB array of id strings) of
+  an `announcement_requests` row with state `published`. One batch row per request, however many
+  of its cases match the filters. Elements that are not UUIDs are ignored (the cast sits inside a
+  `CASE`, so one bad element never fails the query).
+- A case listed by two published requests belongs to the **oldest** (`created_on`, then the
+  greater `id`): the owner the previous client-side grouping ended with. It never appears twice.
+- Row order equals the previous walk over cases in `updated_on DESC NULLS LAST, id` order, with a
+  group placed at its first matching case: groups are keyed by owner and ordered by that first
+  case's `(updated_on, id)`.
+- A batch lists **all** of its request's `published_case_ids`, in that order, independent of the
+  filters (filters choose which rows appear, never which members a row shows). Members are
+  resolved for the returned page only; ids with no visible announcement case are skipped.
+- Batch fields come from the request (creator email, else creator id; the request's timestamps;
+  `resolved_project_count`, else the number of published ids; security flag from
+  `announcement_type`). Case rows carry the case's own fields with the state lower-cased.
+- The total comes from the same statement (a `tot` CTE left-joined to the page), so an empty page, from an offset past the end or a search with no hits, still returns one row that carries the total and no extra query runs. `hasMore` is never true for an empty page.
+- The repository refuses any scope that is not `Unrestricted` with a `ForbiddenError`, in addition to the service and route checks.
+
+Cost: the statement reads every matching case and every published request's id list once, so it
+is linear in announcements plus published members and does not depend on the offset. Measured on
+75,000 announcement cases and 1,200 published requests of 50 members (16,200 rows), as a role
+without BYPASSRLS and `work_mem` at 4 MB, it takes about 210 ms for page 0 and for deep or past-the-end
+offsets alike. The `OFFSET 0` inside the `owners` lateral subquery is a deliberate planner fence: it makes
+the strict UUID check (regex plus cast) run once per published id instead of for the filter and again for
+the sort key (about 310 ms before). The strict regex stays on purpose: `pg_input_is_valid` would also
+accept braced and hyphen-less ids and change which cases group. No index is needed or added: what is
+left is the sort over the unnested member ids, which no index on these tables avoids.
+
+Tests: `announcement_registry_rows_integration_test.go` (needs
+`ANNOUNCEMENT_VISIBILITY_TEST_DSN`, skipped without it) ports the old client-side grouping as an
+oracle and requires identical rows, order, total and members across filters and pages, plus the
+member rule, the two-owners rule, a 12,500-announcement volume case, an empty-page total check and the 403. Assertions are scoped to
+the tests' own seeded projects, so they hold on a database that already holds other announcements
+(only the pre-existing paged-search equivalence test depends on the total announcement count staying
+under the old 10,000 cap).
 
 ## POST /users/search sortBy on the Postgres data source
 
@@ -8971,7 +9194,7 @@ func (h *WidgetHandler) CreateWidget(w http.ResponseWriter, r *http.Request) {
 - Wrap unexpected errors with `fmt.Errorf("operation name: %w", err)` for traceability
 - PostgreSQL enum casts are required for enum columns (e.g. `$1::case_state_enum`)
 - For queries that need both a COUNT and a SELECT, run them concurrently with `errgroup` (see `SearchCases` and `SearchCaseComments` in `case_repo.go`)
-- A search whose caller never shows a total sets `skipTotal` on its request (`domain.SearchCasesRequest`, `SearchIncidentsRequest`, `SearchChangeRequestsRequest`, `SearchProblemsRequest`, `SearchConversationsRequest`): the repository then skips the COUNT entirely and the response's `total` is `domain.TotalNotComputed` (-1), not a lower bound. Three paths ignore the flag and keep reporting a total: the ServiceNow data source, a case search with `groupBy` (bucket counts) and `POST /announcements/registry/cases` (the number returned), so a consumer treats -1 as "no total" and must not assume the reverse. Global search (the CSM portal's quick-nav palette) sends it; the COUNT costs as much as the page query and holds a second pool connection. The default is unchanged. Request bodies are decoded with `DisallowUnknownFields`, so a caller must not send `skipTotal` to a build that predates it (the portal webapp falls back to the plain search on a 400). `search_skip_total_integration_test.go` records the statements each repository sends to prove the COUNT is not run and the page is identical.
+- A search whose caller never shows a total sets `skipTotal` on its request (`domain.SearchCasesRequest`, `SearchIncidentsRequest`, `SearchChangeRequestsRequest`, `SearchProblemsRequest`, `SearchConversationsRequest`): the repository then skips the COUNT entirely and the response's `total` is `domain.TotalNotComputed` (-1), not a lower bound. Four paths ignore the flag and keep reporting a total: the ServiceNow data source, a case search with `groupBy` (bucket counts), `POST /announcements/registry/cases` (the number returned) and `POST /announcements/registry/rows` (the number of grouped rows), so a consumer treats -1 as "no total" and must not assume the reverse. Global search (the CSM portal's quick-nav palette) sends it; the COUNT costs as much as the page query and holds a second pool connection. The default is unchanged. Request bodies are decoded with `DisallowUnknownFields`, so a caller must not send `skipTotal` to a build that predates it (the portal webapp falls back to the plain search on a 400). `search_skip_total_integration_test.go` records the statements each repository sends to prove the COUNT is not run and the page is identical.
 
 ## Domain types
 
@@ -9010,6 +9233,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | A registered contact holding no `REQUESTED` row on the customer stage that is LIVE (registered after the request went out, or a row of theirs cancelled directly): proposing, or answering on it. A request that was withdrawn (a sibling's answer settled the stage) leaves no live stage and is a 409 instead: `change_request_approval_not_pending` for an answer, `change_request_not_proposable` for a proposal | `change_request_not_asked` | 403 |
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |
+| `POST /incidents/{id}/specialist-handoffs` on an incident nobody is assigned to; nothing written | `incident_handoff_needs_assignee` | 409 |
 
 `TestWriteServiceError_CarriesTheMachineReadableCode` (handler) and `TestChangeRequestErrorCodesIntegration_*` (repository, against a real database) pin each code to its refusal. customer-portal `backend-v2` and the CSM portal BFF pass the code through with the status they give it; the customer webapp classifies a refusal by it (`describeChangeRequestActionError`), and a 409 with a code it does not know, or none (an older entity-service), is "something went wrong, refresh", never "already answered".
 

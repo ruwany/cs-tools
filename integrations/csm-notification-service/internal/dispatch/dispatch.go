@@ -63,8 +63,8 @@ type emailSender interface {
 // internal/chataudience) — case.created/case.acknowledged/
 // case.severity_changed all resolve it to the fixed
 // chataudience.IncidentMonitor audience below; there is no product-based
-// routing left in this service (incident.created has no Chat reaction at
-// all — see handleIncidentCreated's own doc comment).
+// routing left in this service. incident.* cards go to the assignment group's
+// own space (notifications.IncidentAudience, from INCIDENT_CHAT_SPACES).
 type googleChatSender interface {
 	SendCaseCreatedAlert(ctx context.Context, audience, severityLabel, severityColor, caseNumber, wso2CaseID, productName, title, team, caseLink string) error
 	SendSecurityReportAnalysisAlert(ctx context.Context, audience, caseNumber, wso2CaseID, productName, title, team, caseLink string) error
@@ -76,6 +76,9 @@ type googleChatSender interface {
 	SendSRCreatedAlert(ctx context.Context, audience string, a notifications.SRCreatedAlert) error
 	SendSRAcknowledgedAlert(ctx context.Context, audience string, a notifications.SRAcknowledgedAlert) error
 	SendSRCustomerCommentAlert(ctx context.Context, audience string, a notifications.SRCustomerCommentAlert) error
+	// The incident.* cards route to the incident's assignment group (incidentAudience).
+	SendIncidentCreatedAlert(ctx context.Context, audience string, a notifications.IncidentCreatedAlert) error
+	SendIncidentAssignedAlert(ctx context.Context, audience string, a notifications.IncidentAssignedAlert) error
 	// HasAudienceSpace answers "does this team have a configured Chat
 	// space" — checkFrustration's own chataudience.Resolve call needs it,
 	// same as internal/slaengine's identical use for SLA breach alerts, and
@@ -125,6 +128,7 @@ type linkResolver interface {
 	ChangeRequestLink(audience, changeRequestID, projectID string) string
 	OutageLink(outageID string) string
 	ServiceRequestLink(caseID string) string
+	IncidentLink(incidentID string) string
 	// IsCustomer classifies a single email as external (customer) vs
 	// internal — handleCommentAdded's frustration-detection gate.
 	IsCustomer(ctx context.Context, email string) (bool, error)
@@ -206,6 +210,14 @@ type Dispatcher struct {
 	// posture WithOnboarding's own cfg has.
 	frustrationDetector escalationDetector
 
+	// pagingTests places paging-number test calls; set via
+	// WithPagingTestCalls, nil when not configured.
+	pagingTests pagingTestCaller
+
+	// specialOps is the SME page for incident.special_ops_alert; see
+	// DeferSpecialOpsPage.
+	specialOps *specialOpsHook
+
 	// slaEngine is set via WithSLAEngine — nil (REDIS_ADDR/REDIS_URL unset)
 	// means handleCaseCreated/handleStatusChanged/handleCommentAdded skip
 	// their own SLA-tracking call entirely, same optional-feature posture as
@@ -238,6 +250,11 @@ type Dispatcher struct {
 	// emailSendingEnabled is true.
 	emailDebugMode       bool
 	emailDebugRecipients []string
+
+	// statusPage / statusPageReports handle outage.status_page_due; nil until
+	// WithStatusPage (CLOUD_STATUS_WEBHOOK_URLS unset).
+	statusPage        statusPagePoster
+	statusPageReports cloudStatusDeliveryReporter
 
 	// callSendingEnabled is the same kind of killswitch (CALL_SENDING_ENABLED)
 	// for incident.created's Twilio call specifically — see
@@ -350,6 +367,128 @@ func (d *Dispatcher) WithFrustrationDetection(detector escalationDetector) *Disp
 // entirely rather than erroring.
 func (d *Dispatcher) WithSLAEngine(engine slaEngineService) *Dispatcher {
 	d.slaEngine = engine
+	return d
+}
+
+// pagingTestCaller places a paging-number test call; internal/paging's
+// TestCaller implements it.
+type pagingTestCaller interface {
+	HandleTestCall(ctx context.Context, p events.PagingTestCallRequestedPayload) error
+}
+
+// WithPagingTestCalls routes paging.test_call_requested to tc. Optional: a
+// deployment without it (no Redis, no entity-service) logs and acknowledges
+// the event.
+func (d *Dispatcher) WithPagingTestCalls(tc pagingTestCaller) *Dispatcher {
+	d.pagingTests = tc
+	return d
+}
+
+// handlePagingTestCall hands a "Test call" press to the tester.
+func (d *Dispatcher) handlePagingTestCall(ctx context.Context, raw json.RawMessage) error {
+	var p events.PagingTestCallRequestedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode paging.test_call_requested payload: %w", err)
+	}
+	if d.pagingTests == nil {
+		slog.WarnContext(ctx, "dispatch: paging test calls are not configured here; ignoring the request",
+			"userId", p.UserID)
+		return nil
+	}
+	return d.pagingTests.HandleTestCall(ctx, p)
+}
+
+// specialOpsPager places the SME page for incident.special_ops_alert; the SRE
+// paging engine (internal/paging) implements it.
+type specialOpsPager interface {
+	HandleSpecialOpsAlert(ctx context.Context, incidentID string, p events.IncidentSpecialOpsAlertPayload) error
+}
+
+// specialOpsHook holds the SME pager. The pager is the SRE paging engine,
+// which cmd/server builds after the sre-events consumers have started, so the
+// hook is set up before them (DeferSpecialOpsPage) and filled in later
+// (WithSpecialOpsPage): an alert arriving in between waits for it rather than
+// being acknowledged with nobody paged.
+type specialOpsHook struct {
+	ready chan struct{}
+	once  sync.Once
+	pager specialOpsPager
+}
+
+// DeferSpecialOpsPage makes incident.special_ops_alert wait until
+// WithSpecialOpsPage has been called. Call it before any consumer starts, and
+// always follow it with WithSpecialOpsPage (nil when there is no SME page).
+func (d *Dispatcher) DeferSpecialOpsPage() *Dispatcher {
+	d.specialOps = &specialOpsHook{ready: make(chan struct{})}
+	return d
+}
+
+// WithSpecialOpsPage routes incident.special_ops_alert to p; nil means no SME
+// page here, and the alert is logged and acknowledged. Only the first call
+// counts. Without DeferSpecialOpsPage it must run before any consumer starts.
+func (d *Dispatcher) WithSpecialOpsPage(p specialOpsPager) *Dispatcher {
+	if d.specialOps == nil {
+		d.specialOps = &specialOpsHook{ready: make(chan struct{})}
+	}
+	h := d.specialOps
+	h.once.Do(func() {
+		h.pager = p
+		close(h.ready)
+	})
+	return d
+}
+
+// handleSpecialOpsAlert hands an incident's move into a Special Ops group to
+// the SME page. This dispatcher path is the only one that pages for it: the
+// paging engines' own consumers ignore the type, even when they read the
+// same topic, so one alert is one page (the page's Redis dedup is a second
+// guard).
+func (d *Dispatcher) handleSpecialOpsAlert(ctx context.Context, entityID string, raw json.RawMessage) error {
+	var p events.IncidentSpecialOpsAlertPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode incident.special_ops_alert payload: %w", err)
+	}
+	h := d.specialOps
+	if h == nil {
+		slog.InfoContext(ctx, "dispatch: no SME page configured here; ignoring the Special Ops alert",
+			"incidentId", p.IncidentID)
+		return nil
+	}
+	select {
+	case <-h.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if h.pager == nil {
+		slog.InfoContext(ctx, "dispatch: no SME page configured here; ignoring the Special Ops alert",
+			"incidentId", p.IncidentID)
+		return nil
+	}
+	id := entityID
+	if id == "" {
+		id = p.IncidentID
+	}
+	return h.pager.HandleSpecialOpsAlert(ctx, id, p)
+}
+
+// statusPagePoster is the slice of *statuspage.Webhook the dispatcher uses.
+type statusPagePoster interface {
+	Post(ctx context.Context, cloud, event, timestamp string) error
+}
+
+// cloudStatusDeliveryReporter is the slice of *entity.CustomerEntityClient
+// that claims a status-page webhook and records its outcome.
+type cloudStatusDeliveryReporter interface {
+	ClaimCloudStatusWebhook(ctx context.Context, webhookID, claimToken string) error
+	RecordCloudStatusDelivery(ctx context.Context, webhookID, claimToken string, d entity.CloudStatusDelivery) error
+}
+
+// WithStatusPage configures handleStatusPageDue and returns d for chaining.
+// Optional per deployment: without it, outage.status_page_due is reported back
+// as undelivered so csm-scheduled-tasks posts it on its next tick.
+func (d *Dispatcher) WithStatusPage(poster statusPagePoster, reports cloudStatusDeliveryReporter) *Dispatcher {
+	d.statusPage = poster
+	d.statusPageReports = reports
 	return d
 }
 
@@ -525,11 +664,12 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	case events.TypeWorkaroundProvided:
 		return d.handleWorkaroundProvided(ctx, env.Payload)
 	case events.TypeIncidentCreated:
-		return d.handleIncidentCreated(ctx, record, env.Payload)
-	case events.TypeIncidentAcknowledged, events.TypeIncidentPriorityElevated, events.TypeIncidentCommentAdded,
-		events.TypeIncidentAssigned:
+		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
+	case events.TypeIncidentAssigned:
+		return d.handleIncidentAssigned(ctx, record, env.EntityID, env.Payload)
+	case events.TypeIncidentAcknowledged, events.TypeIncidentPriorityElevated, events.TypeIncidentCommentAdded:
 		// The incident call-escalation ladder (internal/paging) owns
-		// these four; the notification dispatcher reacts to none of them. Same
+		// these three; the notification dispatcher reacts to none of them. Same
 		// reasoning as the sla.* case below — erroring here would burn this
 		// consumer's retries and dead-letter a perfectly valid event that
 		// simply is not this consumer's concern.
@@ -542,6 +682,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleCRPlanDateNotice(ctx, record, env.Payload)
 	case events.TypeOutageNotificationDue, events.TypeOutageCommunicationDue:
 		return d.handleOutageNotice(ctx, env.Type, env.Payload)
+	case events.TypeOutageStatusPageDue:
+		return d.handleStatusPageDue(ctx, env.Payload)
 	case events.TypeProjectContactInvited:
 		return d.handleProjectContactInvited(ctx, record, env.Payload)
 	case events.TypeProjectContactRegistered:
@@ -552,6 +694,10 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleSRAcknowledged(ctx, record, env.Payload)
 	case events.TypeSRCommentAdded:
 		return d.handleSRCommentAdded(ctx, record, env.Payload)
+	case events.TypePagingTestCallRequested:
+		return d.handlePagingTestCall(ctx, env.Payload)
+	case events.TypeIncidentSpecialOpsAlert:
+		return d.handleSpecialOpsAlert(ctx, env.EntityID, env.Payload)
 	case events.TypeSLATierReached:
 		// Published by internal/slaengine's own Engine.Tick (a poller, not
 		// a consumer of this topic) — nothing here reacts to it yet; it
@@ -1593,10 +1739,8 @@ func (d *Dispatcher) forgetEmailGroups(baseKey string, caseLinks []string) {
 	}
 }
 
-// handleIncidentCreated has exactly one reaction — a voice call — unlike
-// this file's other two-reaction handlers: incident.created no longer has
-// a Google Chat alert at all, per explicit product direction (an incident
-// pages on-call directly; a separate Chat post was redundant with that).
+// handleIncidentCreated places the voice call and posts the "Incident Reported" card to the assignment group's space.
+//
 // entity-service's own IncidentCreatedPayload.Product field is still
 // accepted on the wire (decode-compatibility, unused) but no longer read
 // here — see that field's own doc comment.
@@ -1621,30 +1765,25 @@ func (d *Dispatcher) forgetEmailGroups(baseKey string, caseLinks []string) {
 // sendPerGroup's doc comment); calls have no equivalent debug-recipient
 // concept, so this keeps the simpler disable-entirely shape.
 //
-// With only one channel left, there's no cross-channel release race to
-// guard against the way beginRecord/endRecord exists for elsewhere in this
-// file — this call's own callOwned already fully determines whether it's
-// safe to release, the same reasoning handleCaseAcknowledged's own doc
-// comment gives for its own single-channel shape. claim/forget keys on this
-// specific record (recordBaseKey, unique per event content, not per Kafka
-// delivery — see its doc comment): eventbus.Consumer retries this whole
-// function on any error, and without tracking, a transient failure would
-// resend an already-succeeded call on every retry too.
-func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
+// Two channels use handleCaseCreated's beginRecord/endRecord shape, so a retry for one never repeats the other.
+func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.Record, incidentID string, raw json.RawMessage) error {
 	var p events.IncidentCreatedPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("dispatch: decode incident.created payload: %w", err)
 	}
 
+	baseKey := recordBaseKey(record)
+	callKey := baseKey + "/call"
+	chatKey := baseKey + "/chat"
+	endRecord := d.beginRecord(baseKey)
+
+	var errs []error
+
 	callTo := p.CallTo
 	if callTo == "" {
 		callTo = d.defaultOnCallNumber
 	}
-
-	callKey := recordBaseKey(record) + "/call"
-	callOwned := d.claim(callKey)
-	var callErr error
-	if callOwned {
+	if d.claim(callKey) {
 		switch {
 		case !d.callSendingEnabled:
 			slog.InfoContext(ctx, "dispatch: call sending disabled (CALL_SENDING_ENABLED=false); not calling", "to", maskPhone(callTo))
@@ -1652,28 +1791,82 @@ func (d *Dispatcher) handleIncidentCreated(ctx context.Context, record eventbus.
 			slog.WarnContext(ctx, "dispatch: no callTo for incident.created (payload and INCIDENT_DEFAULT_CALL_TO both empty); skipping call")
 		default:
 			message := fmt.Sprintf("New incident: %s. %s", p.Title, p.ShortDescription)
-			var placed notifications.Call
-			placed, callErr = d.call.MakeCall(ctx, callTo, message)
-			if callErr == nil {
+			placed, callErr := d.call.MakeCall(ctx, callTo, message)
+			if callErr != nil {
+				errs = append(errs, callErr)
+				d.forget(callKey)
+			} else {
 				slog.InfoContext(ctx, "dispatch: incident call placed",
 					"incident", p.Number, "to", maskPhone(callTo),
 					"callSid", placed.SID, "callStatus", placed.Status)
 			}
-			if callErr != nil {
-				d.forget(callKey)
-				callOwned = false
-			}
 		}
 	}
 
-	// Deliberately just callOwned, not "|| record.NoMoreRetries" — see
-	// handleCaseAcknowledged's own doc comment for why that would be wrong
-	// with only one channel/claim total: whichever call actually owns it
-	// is the only call that will ever release it.
-	if callOwned {
-		d.forget(callKey)
+	if audience, ok := d.incidentAudience(ctx, events.TypeIncidentCreated, incidentID, p.Number, p.Team); ok && d.claim(chatKey) {
+		chatErr := d.googleChat.SendIncidentCreatedAlert(ctx, audience, notifications.IncidentCreatedAlert{
+			IncidentID:       incidentID,
+			Number:           p.Number,
+			Team:             p.Team,
+			Priority:         p.Priority,
+			// Title is ServiceNow's short description (the subject); the payload's ShortDescription is the additional comments.
+			ShortDescription: truncateTitle(p.Title, maxChatTitleLength),
+			Service:          p.Service,
+			Environment:      p.Environment,
+			Category:         p.Category,
+			State:            p.State,
+			IncidentLink:     d.links.IncidentLink(incidentID),
+		})
+		if chatErr != nil {
+			errs = append(errs, chatErr)
+			d.forget(chatKey)
+		}
 	}
-	return callErr
+
+	// endRecord runs exactly once per call, as in handleCaseCreated.
+	safeToRelease := endRecord(len(errs) > 0)
+	if record.NoMoreRetries || safeToRelease {
+		d.forget(callKey)
+		d.forget(chatKey)
+	}
+	return errors.Join(errs...)
+}
+
+// handleIncidentAssigned posts the "Incident Acknowledged." reply in the incident's Chat thread.
+func (d *Dispatcher) handleIncidentAssigned(ctx context.Context, record eventbus.Record, incidentID string, raw json.RawMessage) error {
+	var p events.IncidentAssignedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode incident.assigned payload: %w", err)
+	}
+	audience, ok := d.incidentAudience(ctx, events.TypeIncidentAssigned, incidentID, p.Number, p.Team)
+	if !ok {
+		return nil
+	}
+	return d.sendChatOnly(ctx, record, func() error {
+		return d.googleChat.SendIncidentAssignedAlert(ctx, audience, notifications.IncidentAssignedAlert{
+			IncidentID:   incidentID,
+			Number:       p.Number,
+			AssigneeName: p.AssigneeName,
+			UpdatedBy:    p.UpdatedBy,
+			IncidentLink: d.links.IncidentLink(incidentID),
+		})
+	})
+}
+
+// incidentAudience maps an assignment group to its INCIDENT_CHAT_SPACES audience; a missing entry is config, not a retry.
+func (d *Dispatcher) incidentAudience(ctx context.Context, t events.Type, incidentID, number, team string) (string, bool) {
+	if strings.TrimSpace(team) == "" {
+		slog.InfoContext(ctx, "dispatch: incident has no assignment group, no chat alert",
+			"type", string(t), "incidentId", incidentID, "number", number)
+		return "", false
+	}
+	audience := notifications.IncidentAudience(team)
+	if !d.googleChat.HasAudienceSpace(audience) {
+		slog.InfoContext(ctx, "dispatch: assignment group has no INCIDENT_CHAT_SPACES entry, no chat alert",
+			"type", string(t), "incidentId", incidentID, "number", number, "assignmentGroup", team)
+		return "", false
+	}
+	return audience, true
 }
 
 // handleCRPlanDateNotice emails one turn of the plan-start-date conversation:

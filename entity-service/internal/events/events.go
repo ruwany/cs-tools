@@ -415,6 +415,11 @@ type IncidentCreatedPayload struct {
 	// escalation specification intends — the same reasoning
 	// SLAClockRegisterPayload.CaseCreatedAt applies to an SLA clock.
 	ReportedAt string `json:"reportedAt,omitempty"`
+	// Category, State, Service and Environment fill the consumer's "Incident Reported" Chat card.
+	Category    string `json:"category,omitempty"`
+	State       string `json:"state,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Environment string `json:"environment,omitempty"`
 }
 
 // IncidentCommentAddedPayload is the Payload shape for
@@ -506,6 +511,16 @@ type IncidentAssignedPayload struct {
 	// AssigneeName is for the escalation's execution summary; omitted when
 	// ServiceNow returned no display name.
 	AssigneeName string `json:"assigneeName,omitempty"`
+	// AssignedOn is when the assignee was set, RFC3339 UTC. Case Paging's
+	// Special Ops (SME) page compares an alert's changedOn against it, so an
+	// assignment handled before the alert it answers still answers it.
+	// csm-notification-service decodes strictly: deploy the version that
+	// knows the field first.
+	AssignedOn string `json:"assignedOn,omitempty"`
+	// Number, Team and UpdatedBy fill the consumer's threaded "Incident Acknowledged" Chat reply.
+	Number    string `json:"number,omitempty"`
+	Team      string `json:"team,omitempty"`
+	UpdatedBy string `json:"updatedBy,omitempty"`
 }
 
 // IncidentAcknowledgedPayload is the Payload shape for

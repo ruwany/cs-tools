@@ -233,6 +233,30 @@ func announcementLeakGuardFor(scope SearchScope) string {
 const caseLikeStateColumn = `COALESCE(c.state::TEXT, eng.state::TEXT, sr.state::TEXT, sra.state::TEXT,
 	CASE WHEN ann.state::TEXT = 'CLOSE' THEN 'CLOSED' ELSE ann.state::TEXT END)`
 
+// caseLikeOwnStateColumn is the state of a case-like work item as read from the
+// extension table of its OWN type only (work_item.type), NULL when that table
+// has no row for it. It is what every list filter on state matches
+// (caseLikeStateLookupTables looks each type up in its own table), so a count
+// that must equal what a list shows reads the state through this and not
+// through caseLikeStateColumn, whose COALESCE also finds a state in another
+// type's table. Synced data has both kinds of row that the two disagree on:
+//
+//   - a work item whose extension row is missing altogether (no state anywhere);
+//   - a work item typed CASE whose only extension row is an engagement's or a
+//     security report's (a state, but not one a CASE-typed list can see).
+//
+// Neither appears in a list filtered by state, so neither may be counted as
+// outstanding, action required or resolved by a card that links to such a list.
+// announcement_state_enum's CLOSE is normalised to CLOSED, as in
+// caseLikeStateColumn.
+const caseLikeOwnStateColumn = `CASE wi.type
+	WHEN 'CASE' THEN c.state::TEXT
+	WHEN 'ENGAGEMENT' THEN eng.state::TEXT
+	WHEN 'SERVICE_REQUEST' THEN sr.state::TEXT
+	WHEN 'SECURITY_REPORT_ANALYSIS' THEN sra.state::TEXT
+	WHEN 'ANNOUNCEMENT' THEN CASE WHEN ann.state::TEXT = 'CLOSE' THEN 'CLOSED' ELSE ann.state::TEXT END
+END`
+
 // caseLikeCauseColumn/caseLikeCloseNotesColumn/caseLikeResolvedOnColumn
 // mirror caseLikeStateColumn for the other three columns every case-like
 // extension table shares. *_cause_enum's label sets are identical across all
@@ -241,6 +265,20 @@ const caseLikeCauseColumn = `COALESCE(c.cause::TEXT, eng.cause::TEXT, sr.cause::
 const caseLikeCloseNotesColumn = `COALESCE(c.close_notes, eng.close_notes, sr.close_notes, sra.close_notes, ann.close_notes)`
 const caseLikeResolvedOnColumn = `COALESCE(c.resolved_on, eng.resolved_on, sr.resolved_on, sra.resolved_on, ann.resolved_on)`
 const caseLikeClosedOnColumn = `COALESCE(c.closed_on, eng.closed_on, sr.closed_on, sra.closed_on, ann.closed_on)`
+
+// caseLikeOwnClosedOnColumn is the closure time of a work item as read from the
+// extension table of its OWN type only (see caseLikeOwnStateColumn): NULL when
+// that table has no row for it. A closed-date filter and the Closed (Last 30d)
+// card use it so that a work item typed CASE whose only extension row is an
+// engagement's does not match on the engagement's closure time. The detail read
+// keeps caseLikeClosedOnColumn: it shows whatever closure time the item has.
+const caseLikeOwnClosedOnColumn = `CASE wi.type
+	WHEN 'CASE' THEN c.closed_on
+	WHEN 'ENGAGEMENT' THEN eng.closed_on
+	WHEN 'SERVICE_REQUEST' THEN sr.closed_on
+	WHEN 'SECURITY_REPORT_ANALYSIS' THEN sra.closed_on
+	WHEN 'ANNOUNCEMENT' THEN ann.closed_on
+END`
 
 // caseLikeClosedByUserIDColumn mirrors caseLikeClosedOnColumn for
 // closed_by_user_id -- a real column on all five case-like extension tables
@@ -1530,7 +1568,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		convID, convSubject                      *string
 		accountID, accountName, accountTier      *string
 		severity, issueType, workState, caseType *string
-		announcementType                         *string
+		announcementType, engagementType         *string
 		state, cause, closeNotes, resolutionCode *string
 		escalationLevel                          *string
 		isEscalated                              *bool
@@ -1560,7 +1598,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 	scopeArgs := []any{id}
 
 	err := r.db.QueryRow(ctx,
-		`SELECT wi.id, wi.number, wi.wso2_id, wi.type::TEXT, ann.announcement_type::TEXT,
+		`SELECT wi.id, wi.number, wi.wso2_id, wi.type::TEXT, ann.announcement_type::TEXT, eng.type::TEXT,
 		        wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeWorkStateColumn+`,
 		        `+caseLikeStateColumn+`, `+caseLikeCauseColumn+`, `+caseLikeCloseNotesColumn+`,
 		        `+caseLikeResolutionCodeColumn+`, c.current_escalation_level::TEXT, c.is_escalated,
@@ -1584,7 +1622,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		 FROM work_item wi
 		 LEFT JOIN "case" c ON c.id = wi.id
 		 `+caseLikeJoins+`
-		 LEFT JOIN "user" creator ON LOWER(creator.email) = LOWER(wi.created_by)
+		 `+userByEmailJoin("creator", "wi.created_by")+`
 		 LEFT JOIN project p ON p.id = wi.project_id
 		 LEFT JOIN account a ON a.id = wi.account_id
 		 LEFT JOIN "group" cre ON cre.id = a.cre_team_id
@@ -1603,7 +1641,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		 WHERE wi.id = $1 AND wi.type = ANY(`+caseLikeWorkItemTypes+`)
 		   AND `+announcementVisibilityLeakGuard+``, scopeArgs...,
 	).Scan(
-		&cv.ID, &cv.Number, &internalID, &caseType, &announcementType,
+		&cv.ID, &cv.Number, &internalID, &caseType, &announcementType, &engagementType,
 		&description, &severity, &issueType, &workState,
 		&state, &cause, &closeNotes,
 		&resolutionCode, &escalationLevel, &isEscalated,
@@ -1729,6 +1767,16 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 	if caseType != nil {
 		lower := strings.ToLower(*caseType)
 		cv.Type = &lower
+	}
+	// engagement_type_enum is UPPER_SNAKE_CASE ("MIGRATION"); CaseView.EngagementType
+	// carries the lowercase domain value ("migration"), matching SearchCases' own
+	// identical conversion (this column, this same lower-casing) and what
+	// customer-portal's backend-v2 expects to map through its own
+	// caseEngagementTypeRef into a human "Migration"-style display label -- nil for
+	// every case-like type but engagement, where eng's LEFT JOIN never matches.
+	if engagementType != nil {
+		lower := strings.ToLower(*engagementType)
+		cv.EngagementType = &lower
 	}
 	// project_id/deployment_id/deployed_product_id (and deployed_product.
 	// product_id) are all nullable on work_item (migration 0021) -- a case
@@ -2083,14 +2131,15 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	}
 
 	countQuery := `SELECT COUNT(*) FROM comment cc WHERE cc.work_item_id = $1` + typeFilter
-	// LEFT JOIN "user" by email match: comment.created_by is a free-text
-	// VARCHAR (see CreateCaseComment above), not a FK, so a real user id/name
-	// is only available when it happens to match a known user's email.
+	// Joined to "user" by email match (single user per comment, see
+	// userByEmailJoin): comment.created_by is a free-text VARCHAR (see
+	// CreateCaseComment above), not a FK, so a real user id/name is only
+	// available when it happens to match a known user's email.
 	dataQuery := fmt.Sprintf(`
 		SELECT cc.id, cc.work_item_id, cc.type, cc.content, cc.created_by, cc.created_on,
 		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
 		FROM comment cc
-		LEFT JOIN "user" u ON LOWER(u.email) = LOWER(cc.created_by)
+		`+userByEmailJoin("u", "cc.created_by")+`
 		WHERE cc.work_item_id = $1%s
 		ORDER BY cc.created_on DESC, cc.id
 		LIMIT $%d OFFSET $%d`, typeFilter, len(args)+1, len(args)+2)
@@ -2127,6 +2176,7 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 			); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
+			c.Content = domain.StripCommentCodeMarkers(c.Content)
 			c.Type = caseCommentEnumType[typeRaw]
 			if authorID != nil {
 				name := ""
@@ -3099,7 +3149,7 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	// Fields shared with anyOf branches are built by one function so the two
 	// cannot drift apart (see caseFieldPredicates for the column notes).
 	fieldPreds, fieldArgs, nextIdx, err := caseFieldPredicates(caseFieldSet{
-		Types: req.Parsed.Types, ProjectIDs: req.Parsed.ProjectIDs, DeploymentIDs: req.Parsed.DeploymentIDs,
+		Types: req.Parsed.Types, ProjectIDs: req.Parsed.ProjectIDs, AccountIDs: req.Parsed.AccountIDs, DeploymentIDs: req.Parsed.DeploymentIDs,
 		AssignedUserIDs: req.Parsed.AssignedUserIDs, States: req.Parsed.States, Severities: req.Parsed.Severities,
 		IssueTypes: req.Parsed.IssueTypes, EngagementTypes: req.Parsed.EngagementTypes, WorkStates: req.Parsed.WorkStates,
 		EscalationLevels: req.Parsed.EscalationLevels, Tags: req.Parsed.Tags, ExcludeTags: req.Parsed.ExcludeTags,
@@ -3168,17 +3218,24 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		argIdx++
 	}
 
+	// closedOn reads the closure time of the extension table of the work item's
+	// own type (caseLikeOwnClosedOnColumn), not "case".closed_on alone:
+	// engagements, service requests and security report analyses carry their
+	// own closed_on, and the dashboard's Closed (Last 30d) tile counts them
+	// (ResolvedBuckets, same column), so a list behind that tile must be able
+	// to find them.
 	if req.Parsed.ClosedStartDate != nil {
-		where += fmt.Sprintf(" AND c.closed_on >= $%d", argIdx)
+		where += fmt.Sprintf(" AND "+caseLikeOwnClosedOnColumn+" >= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ClosedStartDate)
 		argIdx++
 	}
 	if req.Parsed.ClosedEndDate != nil {
-		where += fmt.Sprintf(" AND c.closed_on <= $%d", argIdx)
+		where += fmt.Sprintf(" AND "+caseLikeOwnClosedOnColumn+" <= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ClosedEndDate)
 		argIdx++
 	}
-	// resolvedOn: "case".resolved_on (migration 0023). Case-only, like closedOn.
+	// resolvedOn: "case".resolved_on (migration 0023). Case-only (closedOn above
+	// reads the own-type extension table; this one has not been widened).
 	if req.Parsed.ResolvedStartDate != nil {
 		where += fmt.Sprintf(" AND c.resolved_on >= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ResolvedStartDate)
@@ -4527,6 +4584,7 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 	switch kind {
 	case "comment":
 		a.Type = domain.ActivityTypeComment
+		a.Content = domain.StripCommentCodeMarkers(a.Content)
 		if commentTypeRaw != nil {
 			if ct, ok := caseCommentEnumType[*commentTypeRaw]; ok {
 				a.CommentType = &ct
@@ -4596,26 +4654,44 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 		commentWorkNoteDataFilter = ` AND cm.type IS DISTINCT FROM 'WORK_NOTE'::comment_type_enum`
 	}
 
+	// Synced attachments live in work_item_attachment, not case_attachment. A
+	// row is skipped while PENDING, and when case_attachment already holds the
+	// same id: a dual-write upload is mirrored into case_attachment under the
+	// backing data source's own attachment identity, which is also the id the
+	// sync gives its work_item_attachment row, so the two tables describe one
+	// file and it must show once. Shared by both queries so total and rows agree.
+	const syncedAttachmentFilter = `
+			  AND wa.state IS DISTINCT FROM 'PENDING'
+			  AND NOT EXISTS (SELECT 1 FROM case_attachment ca WHERE ca.id = wa.id)`
+
 	countQuery := `
 		SELECT
 			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1` + commentWorkNoteFilter + `) +
-			(SELECT COUNT(*) FROM case_attachment WHERE case_id = $1 AND status = 'complete')`
+			(SELECT COUNT(*) FROM case_attachment WHERE case_id = $1 AND status = 'complete') +
+			(SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id
+			 WHERE wa.work_item_id = $1` + syncedAttachmentFilter + `)`
 	if includeFieldChanges {
 		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity WHERE work_item_id = $1)`
 	}
 
+	// An attachment entry's content is never empty: a client that hides
+	// entries with no displayable text (the customer portal's activity tab
+	// does) would otherwise drop every attachment from the feed. It falls back
+	// to the file name, and to a fixed label when a synced row has no name.
+	// Clients render attachment entries from fileName, not from content.
+	//
 	// UNION ALL merges the tables into one timeline. Comment/field-change
 	// rows resolve their (free-text VARCHAR) author by email match against
-	// "user"; attachment rows join it directly, since case_attachment.
-	// uploaded_by is a real UUID FK (migration 0106) -- see this file's
-	// other created_by fixes for why they differ.
+	// "user"; case_attachment rows join it directly, since uploaded_by is a
+	// real UUID FK (migration 0106), while synced work_item_attachment rows
+	// carry a free-text created_by and match by email like comments -- see
+	// this file's other created_by fixes for why they differ.
 	//
-	// The comment/field-change branches' email joins are each wrapped in
-	// their own DISTINCT ON subquery: "user".email has no unique constraint
-	// (migration 0002 only makes user_name UNIQUE), so two user rows
-	// sharing an address would otherwise fan a single row out into more than
-	// one activity entry, while countQuery above still counts it once --
-	// putting the page's rows and its total out of sync.
+	// The comment/field-change branches' email joins go through
+	// userByEmailJoin: "user".email has no unique constraint (migration 0002
+	// only makes user_name UNIQUE), so a plain join would fan a single row
+	// out into more than one activity entry, while countQuery above still
+	// counts it once -- putting the page's rows and its total out of sync.
 	dataQuery := `
 		WITH activity AS (
 			SELECT
@@ -4624,21 +4700,20 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
 				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
 			FROM (
-				SELECT DISTINCT ON (cm.id)
+				SELECT
 					cm.id, cm.content, cm.created_on, cm.created_by AS email,
 					u1.first_name, u1.last_name,
 					COALESCE(u1.name, NULLIF(TRIM(CONCAT_WS(' ', u1.first_name, u1.last_name)), '')) AS name,
 					cm.type
 				FROM comment cm
-				LEFT JOIN "user" u1 ON LOWER(u1.email) = LOWER(cm.created_by)
+				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1` + commentWorkNoteDataFilter + `
-				ORDER BY cm.id, u1.id
 			) c
 
 			UNION ALL
 
 			SELECT
-				a.id, 'attachment' AS kind, COALESCE(a.description, '') AS content, a.created_on AS created_on,
+				a.id, 'attachment' AS kind, COALESCE(NULLIF(TRIM(a.description), ''), a.filename) AS content, a.created_on AS created_on,
 				u2.email, u2.first_name, u2.last_name,
 				COALESCE(u2.name, NULLIF(TRIM(CONCAT_WS(' ', u2.first_name, u2.last_name)), '')) AS name,
 				NULL::text AS comment_type,
@@ -4646,7 +4721,27 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
 			FROM case_attachment a
 			JOIN "user" u2 ON u2.id = a.uploaded_by
-			WHERE a.case_id = $1 AND a.status = 'complete'`
+			WHERE a.case_id = $1 AND a.status = 'complete'
+
+			UNION ALL
+
+			SELECT
+				wa.id, 'attachment' AS kind, COALESCE(NULLIF(TRIM(wa.name), ''), 'Attachment') AS content, wa.created_on AS created_on,
+				COALESCE(u4.email, wa.created_by), u4.first_name, u4.last_name,
+				COALESCE(u4.name, NULLIF(TRIM(CONCAT_WS(' ', u4.first_name, u4.last_name)), '')) AS name,
+				NULL::text AS comment_type,
+				COALESCE(wa.name, '')::text, COALESCE(wa.content_type, '')::text, COALESCE(wa.size_bytes, 0)::bigint,
+				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
+			FROM work_item_attachment wa
+			JOIN work_item wi ON wi.id = wa.work_item_id
+			LEFT JOIN LATERAL (
+				SELECT u.email, u.first_name, u.last_name, u.name
+				FROM "user" u
+				WHERE LOWER(u.email) = LOWER(wa.created_by)
+				ORDER BY u.id
+				LIMIT 1
+			) u4 ON TRUE
+			WHERE wa.work_item_id = $1` + syncedAttachmentFilter
 	if includeFieldChanges {
 		dataQuery += `
 
@@ -4659,15 +4754,14 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
 				fc.field_name, fc.old_value, fc.new_value
 			FROM (
-				SELECT DISTINCT ON (wa.id)
+				SELECT
 					wa.id, wa.created_on, wa.user_email AS email,
 					u3.first_name, u3.last_name,
 					COALESCE(u3.name, NULLIF(TRIM(CONCAT_WS(' ', u3.first_name, u3.last_name)), '')) AS name,
 					wa.field_name, wa.old_value, wa.new_value
 				FROM work_item_activity wa
-				LEFT JOIN "user" u3 ON LOWER(u3.email) = LOWER(wa.user_email)
+				` + userByEmailJoin("u3", "wa.user_email") + `
 				WHERE wa.work_item_id = $1
-				ORDER BY wa.id, u3.id
 			) fc`
 	}
 	dataQuery += `

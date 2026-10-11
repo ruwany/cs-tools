@@ -24,10 +24,12 @@ import {
   deriveFilterLabels,
   extractInlineImageRefId,
   isInlineImageRefSrc,
+  isNoveraOrBotSender,
   hasSingleCodeWrapper,
   hasSubmittableEditorContent,
   linkifyBareUrls,
   normalizeCaseTypeOptions,
+  plainTextCommentToHtml,
   replaceInlineImageSources,
   stripCodeWrapper,
   toUtcEndOfDay,
@@ -100,6 +102,30 @@ describe("normalizeCaseTypeOptions", () => {
   });
 });
 
+describe("isNoveraOrBotSender", () => {
+  it("still recognizes the literal name 'Novera'", () => {
+    expect(isNoveraOrBotSender("Novera", "comment")).toBe(true);
+  });
+
+  it("still recognizes an explicit bot type", () => {
+    expect(isNoveraOrBotSender("", "bot")).toBe(true);
+  });
+
+  // Regression: the real GET /conversations/{id}/messages response sends
+  // createdBy: "" for a Novera reply, not the literal name "Novera" -- every
+  // real human message in this feed has a non-empty createdBy, so an empty
+  // one is itself the bot signal.
+  it("treats an empty createdBy as Novera, even with an ordinary 'comment' type", () => {
+    expect(isNoveraOrBotSender("", "comment")).toBe(true);
+    expect(isNoveraOrBotSender(null, "comment")).toBe(true);
+    expect(isNoveraOrBotSender(undefined, undefined)).toBe(true);
+  });
+
+  it("does not flag a real person's message", () => {
+    expect(isNoveraOrBotSender("Alice", "comment")).toBe(false);
+  });
+});
+
 describe("compareByCreatedOnThenId", () => {
   it("orders human comment before bot when timestamps tie", () => {
     const rows = [
@@ -109,6 +135,27 @@ describe("compareByCreatedOnThenId", () => {
     rows.sort(compareByCreatedOnThenId);
 
     expect(rows.map((r) => r.id)).toEqual(["1", "2"]);
+  });
+
+  // Regression: the real conversation transcript stores a Novera reply with
+  // createdBy: "" (not the name "Novera") and only whole-second timestamp
+  // precision, so a user's question and Novera's answer often share an
+  // identical createdOn -- without isNoveraOrBotSender recognizing the empty
+  // createdBy, this tie fell through to an effectively arbitrary id compare,
+  // and the bot's reply could render above the question that caused it.
+  it("orders the user's question before Novera's empty-createdBy reply when timestamps tie", () => {
+    const rows = [
+      { id: "reply-1", createdOn: "2026-06-24T16:19:34Z", createdBy: "", type: "comment" },
+      {
+        id: "question-1",
+        createdOn: "2026-06-24T16:19:34Z",
+        createdBy: "Jane Doe",
+        type: "comment",
+      },
+    ];
+    rows.sort(compareByCreatedOnThenId);
+
+    expect(rows.map((r) => r.id)).toEqual(["question-1", "reply-1"]);
   });
 });
 
@@ -305,6 +352,44 @@ describe("collapseHtmlSourceWhitespace", () => {
 
   it("trims a newline at the very start and end of the body", () => {
     expect(collapseHtmlSourceWhitespace("\r\n<p>One</p>\r\n")).toBe("<p>One</p>");
+  });
+});
+
+describe("plainTextCommentToHtml", () => {
+  it("converts a plain-text comment's real line breaks into <br>", () => {
+    expect(
+      plainTextCommentToHtml(
+        "Hello,\n\nPlease let us know whether you need further support for this case. Please note that if you are unable to respond, the case will be closed off after one week.\n\nThanks,\nWSO2 Team",
+      ),
+    ).toBe(
+      "Hello,<br><br>Please let us know whether you need further support for this case. Please note that if you are unable to respond, the case will be closed off after one week.<br><br>Thanks,<br>WSO2 Team",
+    );
+  });
+
+  it("handles \\r\\n the same as \\n", () => {
+    expect(plainTextCommentToHtml("Line one\r\nLine two")).toBe("Line one<br>Line two");
+  });
+
+  it("HTML-escapes a literal <, >, &, quote the author typed as plain text", () => {
+    expect(plainTextCommentToHtml("Use < and > and & and \"quotes\" and it's")).toBe(
+      "Use &lt; and &gt; and &amp; and &quot;quotes&quot; and it&#39;s",
+    );
+  });
+
+  it("is a no-op for content that already contains real HTML markup", () => {
+    const html = "<p>Already HTML\nwith a newline</p>";
+    expect(plainTextCommentToHtml(html)).toBe(html);
+  });
+
+  it("is a no-op for content carrying a ServiceNow [code] marker, even with no HTML tags", () => {
+    const withCode = "Intro\n[code]raw markup[/code]\nTail";
+    expect(plainTextCommentToHtml(withCode)).toBe(withCode);
+  });
+
+  it("returns an empty string for empty/non-string input", () => {
+    expect(plainTextCommentToHtml("")).toBe("");
+    // @ts-expect-error -- exercising the runtime guard for non-string input
+    expect(plainTextCommentToHtml(null)).toBe("");
   });
 });
 

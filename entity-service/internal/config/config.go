@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/validate"
 )
 
@@ -58,6 +59,57 @@ const (
 	// SNWritebackFailureRepository) rather than retried or surfaced to the
 	// caller. Piloted on the account entity only — see routes.go.
 	DataSourcePostgresServiceNowDualWrite DataSource = "postgres-servicenow-dual-write"
+)
+
+// SLADataSource identifies which backend SLA-related reads use -- task SLAs
+// (GET /slas/{id}, POST /slas/search, what backs a case's SLA display) and
+// the slaBreached/taskSLABusinessElapsedPercent case-search filters, and the
+// averageResponseTime figure of GET /projects/{id}/cases/stats (internal
+// callers only; the rest of that response stays on DataSource).
+// Independent of DataSource: a deployment can run DataSource=postgres for
+// every other entity while still pointing SLA reads specifically at
+// ServiceNow, or vice versa. GET /sla-status and GET /sla-status/clock-state
+// are NOT affected by this setting -- they have no ServiceNow equivalent at
+// all (see that handler's own doc comment) and always read Postgres.
+type SLADataSource string
+
+const (
+	// SLADataSourcePostgres reads SLA data from this service's own Postgres
+	// tables (sla_live). The default.
+	SLADataSourcePostgres SLADataSource = "postgres"
+	// SLADataSourceServiceNow reads SLA data live from the ServiceNow
+	// integration service instead.
+	SLADataSourceServiceNow SLADataSource = "servicenow"
+)
+
+// AttachmentDataSource identifies which backend three case attachment reads
+// (GET /attachments/{id}, POST /attachments/search, GET
+// /attachments/{id}/content) and the case activity feed (POST
+// /cases/{id}/activities/search) use. GetAttachmentByID (GET
+// /attachments/{id}) is included even though it is metadata, not content:
+// backend-v2's content-download route resolves an attachment's owning case
+// through it first, purely for its own authorization check, before ever
+// calling the content route -- leaving it on DataSource would silently
+// reintroduce a 404 in front of the content route this flag exists to fix.
+// It does NOT affect PATCH/DELETE /attachments/{id}, POST /attachments, or
+// POST /attachments/{id}/confirm -- those always follow DataSource, because
+// the ServiceNow-backed implementation this switches to is read-only and
+// cannot serve those writes. Independent of DataSource and SLADataSource,
+// same reasoning as SLADataSource: a deployment can run DataSource=postgres
+// for every other entity while pointing these three attachment reads and the
+// activity feed specifically at ServiceNow. This is a stopgap for while
+// Postgres-synced attachment content and activity history aren't reliable
+// yet, meant to go away once that migration lands -- see routes.go for the
+// wiring.
+type AttachmentDataSource string
+
+const (
+	// AttachmentDataSourcePostgres reads case attachments and the activity
+	// feed from this service's own Postgres tables. The default.
+	AttachmentDataSourcePostgres AttachmentDataSource = "postgres"
+	// AttachmentDataSourceServiceNow reads case attachments and the activity
+	// feed live from the ServiceNow integration service instead.
+	AttachmentDataSourceServiceNow AttachmentDataSource = "servicenow"
 )
 
 // Config holds all environment-driven settings for the service.
@@ -115,11 +167,21 @@ type Config struct {
 	HealthPort string
 	// DataSource controls which backend is used. Defaults to "postgres".
 	DataSource DataSource
+	// SLADataSource controls which backend SLA-related reads use,
+	// independent of DataSource. Defaults to "postgres" -- see
+	// SLADataSource's own doc comment.
+	SLADataSource SLADataSource
+	// AttachmentDataSource controls which backend two case attachment reads
+	// and the activity feed use, independent of DataSource and
+	// SLADataSource. Defaults to "postgres" -- see AttachmentDataSource's
+	// own doc comment.
+	AttachmentDataSource AttachmentDataSource
 	// ServiceNowIntegrationServiceBaseURL is the base URL for the ServiceNow integration service API.
-	// Required when DataSource is "servicenow".
+	// Required when DataSource is "servicenow" (or SLADataSource is "servicenow" -- see Validate).
 	ServiceNowIntegrationServiceBaseURL string
 	// OAuth2 client credentials for the ServiceNow integration service.
-	// All four fields are required when DataSource is "servicenow".
+	// All four fields are required when DataSource is "servicenow" (or
+	// SLADataSource is "servicenow" -- see Validate).
 	ServiceNowIntegrationServiceTokenURL     string
 	ServiceNowIntegrationServiceClientID     string
 	ServiceNowIntegrationServiceClientSecret string
@@ -219,6 +281,11 @@ type Config struct {
 	GithubBaseURL string
 	// GithubToken authenticates our calls out to GitHub.
 	GithubToken string
+	// GithubRepoTokens is GITHUB_REPO_TOKENS, a secret: one line of JSON mapping
+	// "owner/repository" (or "owner") to the token for that repository, as
+	// ServiceNow kept a credential per repository. A repository it does not
+	// name uses GithubToken. See github.Router.
+	GithubRepoTokens string
 	// GithubIntegrationLogin is our own GitHub account. Events it sent are our
 	// own writes coming back, and are dropped by identity rather than by
 	// pattern-matching the comment body.
@@ -636,6 +703,8 @@ func Load() *Config {
 		ServerPort:                               getEnvOrDefault("SERVER_PORT", "8080"),
 		HealthPort:                               getEnvOrDefault("HEALTH_PORT", "8081"),
 		DataSource:                               DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
+		SLADataSource:                            SLADataSource(getEnvOrDefault("SLA_DATA_SOURCE", string(SLADataSourcePostgres))),
+		AttachmentDataSource:                     AttachmentDataSource(getEnvOrDefault("ATTACHMENT_DATA_SOURCE", string(AttachmentDataSourcePostgres))),
 		ServiceNowIntegrationServiceBaseURL:      os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
 		ServiceNowIntegrationServiceTokenURL:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
 		ServiceNowIntegrationServiceClientID:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID"),
@@ -648,6 +717,7 @@ func Load() *Config {
 		GithubIntegrationEnabled:                 os.Getenv("GITHUB_INTEGRATION_ENABLED") == "true",
 		GithubBaseURL:                            getEnvOrDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
 		GithubToken:                              os.Getenv("GITHUB_TOKEN"),
+		GithubRepoTokens:                         os.Getenv("GITHUB_REPO_TOKENS"),
 		GithubIntegrationLogin:                   os.Getenv("GITHUB_INTEGRATION_LOGIN"),
 		GithubRepoConfigPath:                     strings.TrimSpace(os.Getenv("GITHUB_REPO_CONFIG_PATH")),
 		GithubOutboundInterval:                   envDuration("GITHUB_OUTBOUND_INTERVAL", 15*time.Second),
@@ -916,6 +986,18 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q, %q, or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow, DataSourcePostgresServiceNowDualWrite)
 	}
+	switch c.SLADataSource {
+	case SLADataSourcePostgres, SLADataSourceServiceNow:
+		// valid
+	default:
+		return fmt.Errorf("invalid SLA_DATA_SOURCE %q: must be %q or %q", c.SLADataSource, SLADataSourcePostgres, SLADataSourceServiceNow)
+	}
+	switch c.AttachmentDataSource {
+	case AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow:
+		// valid
+	default:
+		return fmt.Errorf("invalid ATTACHMENT_DATA_SOURCE %q: must be %q or %q", c.AttachmentDataSource, AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow)
+	}
 	// Postgres credentials are required for DATA_SOURCE=postgres and
 	// DATA_SOURCE=postgres-servicenow-dual-write — both serve every entity read
 	// and write from the pool (the fallback mode's ServiceNow leg is a
@@ -954,22 +1036,27 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME must be set together or not at all")
 	}
 	// ServiceNow integration service credentials are required for
-	// DATA_SOURCE=servicenow (reads go there) and also for
+	// DATA_SOURCE=servicenow (reads go there), for
 	// DATA_SOURCE=postgres-servicenow-dual-write (the best-effort mirror write
-	// goes there, via the same client — see SNWritebackDispatcher).
-	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite
+	// goes there, via the same client — see SNWritebackDispatcher), for
+	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead), and for
+	// ATTACHMENT_DATA_SOURCE=servicenow (attachment/activity-feed reads go
+	// there instead) -- all independent of DATA_SOURCE: a plain
+	// DATA_SOURCE=postgres deployment that points SLA or attachment reads at
+	// ServiceNow still needs real credentials for that client.
+	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow || c.AttachmentDataSource == AttachmentDataSourceServiceNow
 	if snRequired {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s", c.DataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
 		}
 		if c.ServiceNowIntegrationServiceTokenURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s", c.DataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientID == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s", c.DataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientSecret == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s", c.DataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
 		}
 	}
 	// EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/EVENT_HUB_TOPIC are
@@ -1027,6 +1114,9 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("%s %q is not an email address", envVar, v)
 			}
 		}
+	}
+	if _, err := github.ParseRepoTokens(c.GithubRepoTokens); err != nil {
+		return err
 	}
 	if v := c.CaseEscalationNotices; v != "" && v != "true" && v != "false" {
 		return fmt.Errorf("CASE_ESCALATION_NOTICES_ENABLED %q must be true, false or unset", v)
@@ -1197,11 +1287,21 @@ func (c *Config) DSN() string {
 // operations/csm-webhooks/github along with the public endpoint, so this
 // service never sees a signature and holding the secret would only imply it
 // did. What still gates the integration is the outbound half: a token to
-// call GitHub with, and the login whose own events must be ignored as ours.
+// call GitHub with -- GITHUB_TOKEN, or per-repository ones in
+// GITHUB_REPO_TOKENS -- and the login whose own events must be ignored as ours.
 func (c *Config) HasGithubIntegration() bool {
 	return c.GithubIntegrationEnabled &&
-		c.GithubToken != "" &&
+		(c.GithubToken != "" || c.hasRepoTokens()) &&
 		c.GithubIntegrationLogin != ""
+}
+
+// hasRepoTokens reports whether GITHUB_REPO_TOKENS names at least one token.
+// A set but empty value ("{}") is not a token: enabling on it would start a
+// sync whose every call fails with github.ErrNoToken. A malformed value counts
+// as none here; Validate refuses it at startup.
+func (c *Config) hasRepoTokens() bool {
+	tokens, err := github.ParseRepoTokens(c.GithubRepoTokens)
+	return err == nil && len(tokens) > 0
 }
 
 // envFlagOn is true unless the value is "false" (case-insensitive).

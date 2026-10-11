@@ -83,6 +83,14 @@ type SearchScope struct {
 	// check at all; callers that also want to treat such a caller as internal
 	// should check Unrestricted separately, as UpdateCase does.
 	HasInternalAccess bool
+	// ViaCustomerPortal is true when the request came from the customer portal's
+	// backend (AccessClientConfig.CustomerPortalBackendClientID), whoever the signed-in
+	// user is -- including WSO2 staff looking at a customer's project. The data scope
+	// is unchanged (a staff user is still Unrestricted); what it changes is which
+	// numbers a card shows: the customer portal's lists show every change request the
+	// caller can see, so its change-request counts use the customer grouping
+	// (crOutstandingStatesFor) for staff too, or a staff user's card and list disagree.
+	ViaCustomerPortal bool
 }
 
 // scopePredicate is the single place the "row belongs to one of the caller's
@@ -412,10 +420,12 @@ var projectActivityCaseTypes = []string{"CASE", "SERVICE_REQUEST", "ENGAGEMENT",
 // Outstanding is "not closed" rather than "in one of these states" on purpose:
 // that is how the project dashboard's Outstanding tile counts
 // (projectCaseStatsService: "active and outstanding are the same set, every
-// state except CLOSED"), and it includes an item with no state at all -- a
-// case-like work item whose extension row is missing, which real synced data
-// has. Listing the open states instead left those out and put the project
-// list below the dashboard for the same project.
+// state except CLOSED"), so a state added to the enum is outstanding without
+// being listed anywhere. It counts only an item that HAS a state of its own
+// type (caseLikeOwnStateColumn): a case-like work item whose extension row is
+// missing, or belongs to another type, which real synced data has, is in no
+// list filtered by state, and the dashboard tile leaves it out for the same
+// reason (the tile used to count it and read higher than the list behind it).
 type ProjectActivityStates struct {
 	CaseClosed         []string
 	CaseActionRequired []string
@@ -474,18 +484,20 @@ func (r *globalSearchRepo) ProjectActivityCounts(ctx context.Context, scope Sear
 
 	eg.Go(func() error {
 		return r.perChunk(ctx, scope, projectIDs, func(q activityQuerier, ids []string) error {
-			// COALESCE(state, '') because an item with no state at all is outstanding
-			// (see ProjectActivityStates): a bare <> ALL would be NULL for it and drop it.
-			notClosed := `COALESCE(` + caseLikeStateColumn + `, '') <> ALL($3::text[])`
+			// The state is the one of the item's own type (caseLikeOwnStateColumn), the
+			// one a list filtered by state matches. An item with none is NULL here and
+			// satisfies neither condition, so it is not counted (see
+			// ProjectActivityStates): a bare <> ALL is NULL for it, which is what drops it.
+			notClosed := caseLikeOwnStateColumn + ` <> ALL($3::text[])`
 			rows, err := q.Query(ctx, `
 				SELECT wi.project_id::text,
 				       COUNT(*) FILTER (WHERE `+notClosed+`),
-				       COUNT(*) FILTER (WHERE `+caseLikeStateColumn+` = ANY($4::text[]))
+				       COUNT(*) FILTER (WHERE `+caseLikeOwnStateColumn+` = ANY($4::text[]))
 				  FROM work_item wi
 				  LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
 				 WHERE wi.project_id = ANY($1::text[]::uuid[])
 				   AND wi.type = ANY($2::work_item_type_enum[])
-				   AND (`+notClosed+` OR `+caseLikeStateColumn+` = ANY($4::text[]))
+				   AND (`+notClosed+` OR `+caseLikeOwnStateColumn+` = ANY($4::text[]))
 				 GROUP BY 1`,
 				ids, projectActivityCaseTypes, nonNil(states.CaseClosed), nonNil(states.CaseActionRequired))
 			if err != nil {

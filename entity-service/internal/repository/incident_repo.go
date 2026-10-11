@@ -151,7 +151,7 @@ type IncidentRepository interface {
 	// already gives. req.AssignmentGroupID, by contrast, DOES have a
 	// backing column (work_item.assignment_group_id, migration 0075) and
 	// IS written here.
-	CreateIncidentFromServiceNow(ctx context.Context, req domain.CreateIncidentRequest, id, number, createdBy string) (domain.CreateIncidentResponse, error)
+	CreateIncidentFromServiceNow(ctx context.Context, req domain.CreateIncidentRequest, id, number, priority, createdBy string) (domain.CreateIncidentResponse, error)
 	// CreateIncident inserts a new incident row (both work_item and
 	// "incident") for the plain-Postgres data source (no ServiceNow at all)
 	// -- createIncidentPortalQuery's own doc comment has the full
@@ -198,6 +198,9 @@ type SpecialistHandoffSnapshot struct {
 	ServiceID           *string
 	AssignmentGroupID   *string
 	AssignmentGroupName *string
+	// AssignedToID is the engineer the incident is assigned to; nil when
+	// nobody is. A handoff needs one.
+	AssignedToID *string
 }
 
 // SpecialistHandoffPlan is what a handoff writes: the group the incident
@@ -722,14 +725,14 @@ func (r *incidentRepo) ApplySpecialistHandoff(ctx context.Context, id, actorEmai
 		var snap SpecialistHandoffSnapshot
 		err := tx.QueryRow(ctx, `
 			SELECT wi.id::text, wi.number, wi.subject, wi.description, inc.state::text,
-			       inc.service_id::text, wi.assignment_group_id::text, g.name
+			       inc.service_id::text, wi.assignment_group_id::text, g.name, wi.assigned_to_id::text
 			FROM incident inc
 			JOIN work_item wi ON wi.id = inc.id
 			LEFT JOIN "group" g ON g.id = wi.assignment_group_id
 			WHERE inc.id = $1 AND wi.type = 'INCIDENT'
 			FOR UPDATE OF inc, wi`, id).Scan(
 			&snap.IncidentID, &snap.Number, &snap.Subject, &snap.Description, &snap.State,
-			&snap.ServiceID, &snap.AssignmentGroupID, &snap.AssignmentGroupName)
+			&snap.ServiceID, &snap.AssignmentGroupID, &snap.AssignmentGroupName, &snap.AssignedToID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return SpecialistHandoffWritten{}, &apierror.NotFoundError{Msg: "incident not found"}
 		}
@@ -942,15 +945,14 @@ func (r *incidentRepo) SearchIncidentActivities(ctx context.Context, req domain.
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
 				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
 			FROM (
-				SELECT DISTINCT ON (cm.id)
+				SELECT
 					cm.id, cm.content, cm.created_on, cm.created_by AS email,
 					u1.first_name, u1.last_name,
 					COALESCE(u1.name, NULLIF(TRIM(CONCAT_WS(' ', u1.first_name, u1.last_name)), '')) AS name,
 					cm.type
 				FROM comment cm
-				LEFT JOIN "user" u1 ON LOWER(u1.email) = LOWER(cm.created_by)
+				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1
-				ORDER BY cm.id, u1.id
 			) c`
 	if includeFieldChanges {
 		dataQuery += `
@@ -964,15 +966,14 @@ func (r *incidentRepo) SearchIncidentActivities(ctx context.Context, req domain.
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
 				fc.field_name, fc.old_value, fc.new_value
 			FROM (
-				SELECT DISTINCT ON (wa.id)
+				SELECT
 					wa.id, wa.created_on, wa.user_email AS email,
 					u3.first_name, u3.last_name,
 					COALESCE(u3.name, NULLIF(TRIM(CONCAT_WS(' ', u3.first_name, u3.last_name)), '')) AS name,
 					wa.field_name, wa.old_value, wa.new_value
 				FROM work_item_activity wa
-				LEFT JOIN "user" u3 ON LOWER(u3.email) = LOWER(wa.user_email)
+				` + userByEmailJoin("u3", "wa.user_email") + `
 				WHERE wa.work_item_id = $1
-				ORDER BY wa.id, u3.id
 			) fc`
 	}
 	dataQuery += `
@@ -1478,6 +1479,7 @@ func (r *incidentRepo) CreateIncident(ctx context.Context, req domain.CreateInci
 		resp.Incident.Number = outNumber
 		resp.Incident.CreatedOn = outCreatedOn.UTC().Format(time.RFC3339)
 		resp.Incident.CreatedBy = outCreatedBy
+		resp.Incident.Priority = priority
 		return resp, nil
 	})
 	if err != nil {
@@ -1573,13 +1575,13 @@ const createIncidentFromServiceNowQuery = `
 			id, caller_id, category, impact, urgency,
 			service_id, service_offering_id, contact_type,
 			change_request_id, caused_by_id, parent_incident_id, problem_id,
-			opened_on, correlation_id, environment
+			opened_on, correlation_id, environment, priority
 		)
 		VALUES (
 			$1, $7::uuid, $8::incident_category_enum, $9::incident_impact_enum, $10::incident_urgency_enum,
 			$11::uuid, $12::uuid, $13::incident_contact_type_enum,
 			$14::uuid, $15::uuid, $16::uuid, $17::uuid,
-			NOW(), $18, $19
+			NOW(), $18, $19, $20::incident_priority_enum
 		)
 		RETURNING id
 	)
@@ -1588,7 +1590,7 @@ const createIncidentFromServiceNowQuery = `
 	JOIN inserted_incident ii ON ii.id = iwi.id`
 
 // CreateIncidentFromServiceNow implements IncidentRepository.
-func (r *incidentRepo) CreateIncidentFromServiceNow(ctx context.Context, req domain.CreateIncidentRequest, id, number, createdBy string) (domain.CreateIncidentResponse, error) {
+func (r *incidentRepo) CreateIncidentFromServiceNow(ctx context.Context, req domain.CreateIncidentRequest, id, number, priority, createdBy string) (domain.CreateIncidentResponse, error) {
 	var contactType *string
 	if req.ContactType != nil {
 		v := incidentContactTypeToEnum(*req.ContactType)
@@ -1607,15 +1609,25 @@ func (r *incidentRepo) CreateIncidentFromServiceNow(ctx context.Context, req dom
 		outID, outNumber, outSubject, outCreatedBy string
 		outCreatedOn, outUpdatedOn                 time.Time
 	)
-	err := r.db.QueryRow(ctx, createIncidentFromServiceNowQuery,
-		id, createdBy,
-		number, req.Subject, req.ParentID, req.AssignmentGroupID,
-		req.CallerID, string(req.Category), string(req.Impact), string(req.Urgency),
-		req.ServiceID, req.ServiceOfferingID, contactType,
-		req.ChangeRequestID, req.CausedByID, req.ParentIncidentID, req.ProblemID,
-		req.CorrelationID, req.Environment,
-	).Scan(&outID, &outNumber, &outSubject, &outCreatedOn, &outUpdatedOn, &outCreatedBy)
+	// The work note and additional comment sent with the create are stored with the record, as CreateIncident does.
+	_, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) (struct{}, error) {
+		if err := tx.QueryRow(ctx, createIncidentFromServiceNowQuery,
+			id, createdBy,
+			number, req.Subject, req.ParentID, req.AssignmentGroupID,
+			req.CallerID, string(req.Category), string(req.Impact), string(req.Urgency),
+			req.ServiceID, req.ServiceOfferingID, contactType,
+			req.ChangeRequestID, req.CausedByID, req.ParentIncidentID, req.ProblemID,
+			req.CorrelationID, req.Environment, priority,
+		).Scan(&outID, &outNumber, &outSubject, &outCreatedOn, &outUpdatedOn, &outCreatedBy); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, insertIncidentNotesTx(ctx, tx, outID, req.WorkNotes, req.AdditionalComments, createdBy)
+	})
 	if err != nil {
+		var ve *apierror.ValidationError
+		if errors.As(err, &ve) {
+			return domain.CreateIncidentResponse{}, err
+		}
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
 			case "23505": // unique_violation on id/number -- see this method's own doc comment for why this "shouldn't" happen
@@ -1636,5 +1648,6 @@ func (r *incidentRepo) CreateIncidentFromServiceNow(ctx context.Context, req dom
 	resp.Incident.Number = outNumber
 	resp.Incident.CreatedOn = outCreatedOn.UTC().Format(time.RFC3339)
 	resp.Incident.CreatedBy = outCreatedBy
+	resp.Incident.Priority = priority
 	return resp, nil
 }
