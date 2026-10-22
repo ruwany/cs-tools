@@ -111,7 +111,11 @@ The detail page shows:
   - **Plan** shows the change-review packet: description, justification,
     impact description, rollback plan, test plan, service outage notes, the
     communication plan, the implementation plan, and the affected
-    services/components text and rollback duration. Below that, an **SRE
+    services/components text and rollback duration. A **Deviation from the
+    implementation plan** (what the implementation or the review actually did
+    differently from the plan) is shown right under the implementation plan,
+    set apart by an amber edge, and the **Plan** tab itself carries an amber
+    dot when there is one. Below that, an **SRE
     details** card shows further fields the backing system tracks:
     priority, requested by, change request type, likelihood, whether the
     Implementation Plan is visible to customers, when the customer last
@@ -244,7 +248,12 @@ From the detail page a CS engineer can:
   passed), and the implementation/rollback/test/affected-services/
   affected-components plans, or **Clone** the change request into a new one
   pre-filled with this one's values (useful for promoting the same change
-  through another environment). The Customer Project, deployments and
+  through another environment; a deviation from the implementation plan is
+  copied too). Once CAB approval has been received every field is
+  read-only, except the work note and the **Deviation from the
+  implementation plan**, which you can record (and correct) until the
+  change request is closed, canceled or rolled back; after that it is
+  final. The deviation is internal: customers never see it. The Customer Project, deployments and
   deployment products can only be changed until implementation starts; the
   deployment products follow from the chosen deployments and are not picked.
   What the customer has confirmed isn't editable here — it is recorded by the
