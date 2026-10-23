@@ -67,8 +67,8 @@ change request can't be selected. The selection bar then offers:
     need a reason, which is added to each one as an internal work note.
   - **Type** and **Customer Project** can be set only when every selected change
     request is still New: they are fixed once approval has been requested. Until
-    CAB approval the **deployments** can still change, within the project, when
-    all the selected change requests share one.
+    the change request is approved the **deployments** can still change, within
+    the project, when all the selected change requests share one.
   - A planned date set on its own is checked against each change request's
     other planned date; one it wouldn't fit is skipped.
   - **Customer approval** and **Customer review** offer only what every selected
@@ -77,9 +77,10 @@ change request can't be selected. The selection bar then offers:
     neither (setting the type to Emergency turns both off).
   - A change request on hold can't change state unless the same edit takes it
     off hold.
-  - Once CAB approval has been received a change request's fields are
-    read-only, so it gets only the state, on hold, the work note and the
-    additional comment, and one left with nothing to change is skipped.
+  - Once a change request has been approved (by the CAB, or by Request
+    Approval for a Standard change) its fields are read-only, so it gets only
+    the state, on hold, the work note and the additional comment, and one left
+    with nothing to change is skipped.
 - **Assign to me (n)**: makes you the assignee of each selected change request
   that has not been approved yet.
 
