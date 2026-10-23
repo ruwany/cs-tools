@@ -1059,9 +1059,12 @@ const CHANGE_REQUEST_APPROVED_STATES: readonly string[] = [
   "rollback",
 ];
 
-/** Why an approved change request's fields are read-only. */
+/**
+ * Why an approved change request's fields are read-only. Worded without naming
+ * the CAB: a Standard change is approved by Request Approval, with no CAB stage.
+ */
 export const CHANGE_REQUEST_APPROVED_READ_ONLY_REASON =
-  "CAB approval has been received, so this change request's fields are read-only. Only work notes can be added.";
+  "This change request has been approved, so its fields are read-only. Only work notes can be added.";
 
 /**
  * Why every field of the change request is read-only in `state` (it has been
@@ -1073,9 +1076,9 @@ export function changeRequestApprovedReadOnlyReason(state?: string | null): stri
   return state && CHANGE_REQUEST_APPROVED_STATES.includes(state) ? CHANGE_REQUEST_APPROVED_READ_ONLY_REASON : null;
 }
 
-/** The approved notice while the deviation from the implementation plan can still be recorded. */
+/** The approved notice while the deviation from the implementation plan can still be recorded (no CAB claim either). */
 export const CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON =
-  "CAB approval has been received, so this change request's fields are read-only. You can still record a deviation from the implementation plan and add work notes.";
+  "This change request has been approved, so its fields are read-only. You can still record a deviation from the implementation plan and add work notes.";
 
 /**
  * The Edit form's notice for an approved change request: the fields are read-only,

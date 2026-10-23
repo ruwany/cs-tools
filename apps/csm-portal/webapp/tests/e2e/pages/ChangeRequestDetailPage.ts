@@ -430,9 +430,10 @@ export class ChangeRequestDetailPage {
     return this.editDialog().getByRole("button", { name: /^(Add work note|Saving…)$/ });
   }
 
-  /** The notice over the form once the change request has been approved (CAB approval received). */
+  /** The notice over the form once the change request has been approved (CAB approval received; a Standard change once
+   * Request Approval scheduled it). */
   editApprovedNotice(): Locator {
-    return this.editDialog().getByText(/CAB approval has been received, so this change request's fields are read-only/);
+    return this.editDialog().getByText(/This change request has been approved, so its fields are read-only/);
   }
 
   /** The Edit form's "Deviation from the implementation plan" (its labelled group). */

@@ -1325,6 +1325,11 @@ describe("the deviation from the implementation plan", () => {
     expect(changeRequestApprovedNotice("rollback")).toBe(CHANGE_REQUEST_APPROVED_READ_ONLY_REASON);
     // Canceled is not approved: its fields are editable, its deviation is final.
     expect(changeRequestApprovedNotice("canceled")).toBeNull();
+    // A Standard change is approved by Request Approval, with no CAB stage: neither notice names the CAB.
+    for (const notice of [CHANGE_REQUEST_APPROVED_READ_ONLY_REASON, CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON]) {
+      expect(notice).not.toMatch(/CAB/);
+      expect(notice).toMatch(/^This change request has been approved, so its fields are read-only\./);
+    }
   });
 });
 

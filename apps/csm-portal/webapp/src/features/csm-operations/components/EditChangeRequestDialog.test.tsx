@@ -803,7 +803,7 @@ describe("EditChangeRequestDialog — Customer Approval / Customer Review checkb
         renderDialog({ state, project: ACME, customerApprovalRequired: true, customerReviewRequired: false });
         expect(approvalBox()).toBeDisabled();
         expect(reviewBox()).toBeDisabled();
-        expect(screen.getByText(/CAB approval has been received/)).toBeInTheDocument();
+        expect(screen.getByText(/This change request has been approved/)).toBeInTheDocument();
         // Nothing can be saved: the box does not promise an edit the form no longer offers.
         expect(reviewBox()).not.toHaveAccessibleDescription(/Once saved this can't be removed/);
       },
@@ -1314,7 +1314,7 @@ describe("EditChangeRequestDialog — read-only once approved, work notes only",
       implementationPlan: "<p>Run the upgrade playbook.</p>",
       category: "devops",
     });
-    expect(screen.getByText(/CAB approval has been received, so this change request's fields are read-only/)).toBeInTheDocument();
+    expect(screen.getByText(/This change request has been approved, so its fields are read-only/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /^subject/i })).toBeDisabled();
     for (const name of [/^description/i, /^justification/i, /risk and impact analysis/i, /^implementation plan/i, /rollback plan/i, /test plan/i]) {
       expect(planEditor(name)).toBeDisabled();
@@ -1342,7 +1342,7 @@ describe("EditChangeRequestDialog — read-only once approved, work notes only",
 
   it.each(["new", "assess", "authorize", "canceled"])("leaves the fields editable in %s (not approved), with no notice", (state) => {
     renderDialog({ state });
-    expect(screen.queryByText(/CAB approval has been received/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This change request has been approved/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /^subject/i })).toBeEnabled();
     expect(planEditor(/^implementation plan/i)).toBeEnabled();
     expect(saveButton()).toHaveTextContent("Save");
