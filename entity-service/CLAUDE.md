@@ -5011,10 +5011,10 @@ the rest moved to a project with contacts, `createAnswerable`).
 
 ### An approved change request is read-only (only work notes and the deviation are added)
 
-Decision (the user's, 2026-10-21): once CAB approval has been received, every field of the change
-request is read-only, the implementation plan included; only work notes can still be added, and (the
-user's, 2026-10-22) the deviation from the implementation plan, until the change is closed or rolled back
-(see the next section). Code:
+Decision (the user's, 2026-10-21): once the change request has been approved (CAB approval, or Request
+Approval for a Standard change), every field of the change request is read-only, the implementation plan
+included; only work notes can still be added, and (the user's, 2026-10-22) the deviation from the
+implementation plan, until the change is closed, canceled or rolled back (see the next section). Code:
 `change_request_approved_lock.go` (`checkApprovedContentLock`, called in `patchChangeRequestTx` right
 after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`change_request_approved_read_only`).
 
@@ -5063,7 +5063,8 @@ after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`chang
 
 Decision (the user's, 2026-10-22): what the implementation or the review actually did differently from the
 approved implementation plan is recorded in a field of its own, "Deviation from the implementation plan",
-that stays editable after CAB approval until the change request reaches a final state, and is copied by a
+that stays editable after approval (CAB approval, or Request Approval for a Standard change, which has no CAB
+stage) until the change request reaches a final state (closed, canceled or rolled back), and is copied by a
 clone. Code: `change_request_deviation.go`; migration `0245_change_request_implementation_deviation.sql`
 (`change_request.implementation_deviation TEXT`, `ADD COLUMN IF NOT EXISTS`, safe to re-run). Apply it before deploying
 the build, as usual: the detail read and both create inserts name the column, so the build fails every change request

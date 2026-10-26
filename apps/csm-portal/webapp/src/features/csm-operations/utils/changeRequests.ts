@@ -1085,8 +1085,8 @@ export const CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON =
 
 /**
  * The Edit form's notice for an approved change request: the fields are read-only,
- * and until the change is closed or rolled back a deviation from the implementation
- * plan can still be recorded beside the work notes. `null` before the approval.
+ * and until the change is closed, canceled or rolled back a deviation from the
+ * implementation plan can still be recorded beside the work notes. `null` before the approval.
  */
 export function changeRequestApprovedNotice(state?: string | null): string | null {
   if (!changeRequestApprovedReadOnlyReason(state)) return null;

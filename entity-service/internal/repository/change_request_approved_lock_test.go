@@ -179,7 +179,8 @@ func TestApprovedContentLockedMsg(t *testing.T) {
 	if got != want {
 		t.Errorf("message = %q\nwant      %q", got, want)
 	}
-	// Once it is closed or rolled back, that is final too.
+	// Closed and rolled back are approved and final, so no deviation either. (Canceled
+	// is final too, but is not an approved state, so it never reaches this message.)
 	for _, state := range []string{crStateClosed, crStateRollback} {
 		got := approvedContentLockedMsg([]string{"description"}, state)
 		want := "description can no longer be changed: the change request has been approved (current state: " + lockStateName(state) + "), so its fields are read-only; only work notes can be added"

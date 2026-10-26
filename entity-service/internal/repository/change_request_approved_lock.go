@@ -70,8 +70,9 @@ func changeRequestContentApproved(state string) bool {
 
 // approvedContentLockedMsg is the 400 for a PATCH that changes the named fields of
 // an approved change request. It says what is still possible: work notes, and,
-// until the change is closed or rolled back, the deviation from the
-// implementation plan (change_request_deviation.go).
+// until the change is closed, canceled or rolled back, the deviation from the
+// implementation plan (change_request_deviation.go). Of those final states only
+// closed and rolled back are approved states, so only they reach this message.
 func approvedContentLockedMsg(fields []string, state string) string {
 	still := "only work notes and the deviation from the implementation plan can be added"
 	if terminalChangeRequestState(state) {

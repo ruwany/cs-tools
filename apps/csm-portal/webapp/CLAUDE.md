@@ -328,7 +328,7 @@ impact analysis (sent as `impactDescription`), beside the fields it already had.
 Once the change request has been approved (`changeRequestApprovedReadOnlyReason`: Customer Approval, Scheduled, Implement,
 Review, Customer Review, Closed, Rollback -- CAB approval received, or a Standard change scheduled; not Canceled) every
 field is disabled under one notice and the form's inputs are the internal **Work note**, sent as `workNote` with the
-button "Add work note", and, until the change is closed or rolled back, the deviation from the implementation plan (next
+button "Add work note", and, until the change is closed, canceled or rolled back, the deviation from the implementation plan (next
 section). This mirrors entity-service's approved-content lock (400 `change_request_approved_read_only`),
 which is the authority; the deployments' window (`changeRequestScopeLockedReason`) closes at the same point, and the review
 box can no longer be added after the approval. A work note can ride with any save before the approval too;

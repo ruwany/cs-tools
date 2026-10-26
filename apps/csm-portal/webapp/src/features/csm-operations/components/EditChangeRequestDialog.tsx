@@ -296,7 +296,7 @@ export default function EditChangeRequestDialog({
   const initialCustomerApprovalRequired = cr.customerApprovalRequired ?? false;
   const initialCustomerReviewRequired = cr.customerReviewRequired ?? false;
   // Once approved, every field is read-only: only a work note can be added, and,
-  // until the change is closed or rolled back, the deviation from the plan.
+  // until the change is closed, canceled or rolled back, the deviation from the plan.
   const approvedLock = changeRequestApprovedReadOnlyReason(cr.state);
   const approvedNotice = changeRequestApprovedNotice(cr.state);
   const fieldsDisabled = isSaving || !!approvedLock;
