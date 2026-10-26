@@ -17,6 +17,7 @@
  */
 
 import { useId, useRef, useState, type FormEvent, type JSX, type ReactNode, type RefObject } from "react";
+import RequiredMark from "@components/RequiredMark";
 import { familyOfLadder } from "../utils/caseAlertChainSettings";
 import { useCaseAlertDrafts } from "../utils/caseAlertDrafts";
 import type {
@@ -34,6 +35,7 @@ import {
   fileOnlyRows,
   formatLadderValue,
   ladderKeysFor,
+  ladderValueRequired,
   limitHint,
   parseDraft,
   sameLadderValue,
@@ -493,13 +495,19 @@ interface EditorProps {
   onChange: (d: LadderDraft) => void;
 }
 
-/** The editor for one key, by the kind of value it takes. */
+/** The editor for one key, by the kind of value it takes. Each caption sits in
+ *  a span so its asterisk stays beside it in the label's flex column. */
 function Editor({ spec, draft, onChange }: EditorProps): JSX.Element {
+  const required = ladderValueRequired(spec);
   const text = (type: "text" | "number" = "text") => (
     <label>
-      New value
+      <span>
+        New value
+        {required ? <RequiredMark /> : null}
+      </span>
       <input
         type={type}
+        required={required}
         min={type === "number" ? spec.min : undefined}
         max={type === "number" ? spec.max : undefined}
         value={draft.text}
@@ -525,8 +533,11 @@ function Editor({ spec, draft, onChange }: EditorProps): JSX.Element {
     case "enum":
       return (
         <label>
-          New value
-          <select value={draft.text} onChange={(e) => onChange({ ...draft, text: e.target.value })}>
+          <span>
+            New value
+            <RequiredMark />
+          </span>
+          <select required value={draft.text} onChange={(e) => onChange({ ...draft, text: e.target.value })}>
             {(spec.options ?? []).map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -539,12 +550,23 @@ function Editor({ spec, draft, onChange }: EditorProps): JSX.Element {
       return (
         <>
           <label>
-            Name
-            <input value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} />
+            <span>
+              Name
+              <RequiredMark />
+            </span>
+            <input required value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} />
           </label>
           <label>
-            Email
-            <input type="email" value={draft.email} onChange={(e) => onChange({ ...draft, email: e.target.value })} />
+            <span>
+              Email
+              <RequiredMark />
+            </span>
+            <input
+              type="email"
+              required
+              value={draft.email}
+              onChange={(e) => onChange({ ...draft, email: e.target.value })}
+            />
           </label>
         </>
       );

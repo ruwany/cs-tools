@@ -41,7 +41,11 @@ import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourc
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { pickAccessibleText } from "@utils/contrastText";
-import { sanitizeRichTextHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
+import {
+  isBlankHtml,
+  sanitizeRichTextHtml,
+  stripLightModeInlineStyles,
+} from "@utils/sanitizeHtml";
 import { useDarkMode } from "@utils/useDarkMode";
 import { initialsOf } from "@utils/userClaims";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
@@ -98,6 +102,15 @@ function isSafeHref(href: string | undefined): href is string {
   } catch {
     return false;
   }
+}
+
+/**
+ * An edit that leaves nothing to show: the backend refuses only an empty
+ * string, but a cleared rich editor sends `<p><br></p>`, which would save a
+ * blank comment. An inline image counts as content, as it does on display.
+ */
+function isEmptyCommentEdit(html: string): boolean {
+  return !/<img\b/i.test(html) && isBlankHtml(html);
 }
 
 const ROLE_LABEL: Record<CsmCommentAuthorRole, string> = {
@@ -318,8 +331,9 @@ export default function CsmCaseCommentBubble({
     setEditValue(comment.bodyHtml);
     setEditError(null);
   };
+  const editIsEmpty = isEmptyCommentEdit(editValue);
   const saveEdit = async (): Promise<void> => {
-    if (!onEditComment) return;
+    if (!onEditComment || editIsEmpty) return;
     setIsSavingEdit(true);
     setEditError(null);
     try {
@@ -578,7 +592,7 @@ export default function CsmCaseCommentBubble({
                 onClick={() => {
                   void saveEdit();
                 }}
-                disabled={isSavingEdit}
+                disabled={isSavingEdit || editIsEmpty}
               >
                 {isSavingEdit ? "Saving…" : "Save"}
               </Button>

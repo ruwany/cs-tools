@@ -26,6 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import type { BeSubscriptionType } from "@api/backend/types";
+import RequiredMark from "@components/RequiredMark";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { DRY_RUN_TAG_LABEL, useAnnouncementDryRun } from "@features/csm-announcements/api/useAnnouncementDryRun";
@@ -319,6 +320,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
             sx={{ display: "block", mb: 0.5 }}
           >
             Description
+            <RequiredMark />
           </Typography>
           {/* Editor doesn't accept an `id`, so associate the label by wrapping
               the editor in a labelled group for assistive tech. */}
@@ -332,6 +334,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
               maxHeight={420}
               toolbarVariant="full"
               disabled={busy}
+              ariaRequired
             />
           </Box>
         </Grid>

@@ -23,7 +23,9 @@ import type { BeCatalogItemVariable } from "@api/backend/types";
 // field, which none of these assertions touch — stub it to a marker so the
 // suite stays a fast, focused test of control selection.
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: () => <div data-testid="rich-text-editor" />,
+  default: ({ ariaRequired }: { ariaRequired?: boolean }) => (
+    <div data-testid="rich-text-editor" aria-required={ariaRequired ? "true" : undefined} />
+  ),
 }));
 
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
@@ -297,5 +299,31 @@ describe("CatalogVariableFields — SR variable metadata (mandatory/readOnly/max
     );
 
     expect(screen.queryByText("Not a valid email")).not.toBeInTheDocument();
+  });
+});
+
+describe("CatalogVariableFields — rich-text Description", () => {
+  const DESCRIPTION: BeCatalogItemVariable = {
+    id: "66666666-6666-6666-6666-666666666666",
+    questionText: "Description",
+    order: 100,
+    type: "multi_line_text",
+  };
+
+  it("puts the required asterisk on its caption and aria-required on the editor when mandatory", () => {
+    renderFields([{ ...DESCRIPTION, mandatory: true }]);
+
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByTestId("rich-text-editor")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("shows neither when the variable is optional", () => {
+    renderFields([{ ...DESCRIPTION, mandatory: false }]);
+
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(caption.textContent).not.toContain("*");
+    expect(screen.getByTestId("rich-text-editor")).not.toHaveAttribute("aria-required");
   });
 });

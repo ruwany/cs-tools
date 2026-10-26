@@ -222,6 +222,28 @@ Every paginated data table backed by a real MUI `<Table>` (`ProductVulnerabiliti
 
 **`CasesFilterBar.tsx`'s "Quick filters"/"Advanced" toggle stashes-and-restores instead of disabling.** The Quick filters grid can't represent every filter shape the Advanced builder can (an OR group, `tags`, certain operators) — clicking Quick filters used to just be `disabled` whenever the active filter had anything like that, with no way to even look at the Quick filters grid without first clearing it by hand. It's unconditionally clickable now: clicking it while not Simple-representable resets the active filter to `DEFAULT_CASES_FILTERS` (preserving `search`, which is shared by both modes and edited independently of this toggle) — Quick filters must never silently keep an Advanced-only criterion applied behind a grid that can't display it — but stashes the previous value in local state first, so an accidental click doesn't lose real filter criteria: clicking straight back to Advanced restores it. That stash is dropped the moment a real edit happens in Quick filters (routed through `handleSimpleFieldChange`, not `onChange` directly) — restoring stale Advanced criteria over a filter the user just deliberately changed would be its own kind of surprising data loss. Any other "switching view A to view B loses some of A's state" toggle in this app should follow the same shape: clear-with-a-stash-and-restore, not a disabled control with no path forward.
 
+## Required fields: mark what the code requires, the same way everywhere
+
+A field the code refuses to save without (a disabled Save, a validation message, a backend 400) carries the
+standard asterisk, so the user can see it before they try. One convention, no hand-typed `*`:
+
+- **MUI inputs**: the `required` prop (`TextField`, `FormControl`, `Autocomplete`'s `renderInput`, a DatePicker's
+  `slotProps.textField.required`, the repo's `AsyncEntitySelect` / `AsyncEntityMultiSelect` / `AsyncUserIdSingleSelect`).
+  It draws MUI's aria-hidden asterisk (`MuiFormLabel-asterisk`) and sets `aria-required`.
+- **A caption the page draws itself** (a rich-text editor's label, a section title over a group): `<RequiredMark />`
+  (`@components/RequiredMark`), the same aria-hidden asterisk, plus `ariaRequired` on the `Editor` /
+  `EditorWithSourceToggle` or `required` on `ExpandableRichTextField`.
+- **Conditional** requirements are marked only while they apply (`required={isTransitioningToResolved}`), and any
+  caption that explains them is shown under the same condition.
+- **Needed for a later step, not for saving** (a change request's Assignment group before Request Approval, an
+  announcement's description before Submit / Publish): the asterisk plus helper text naming the step ("Required to request
+  approval."); saving stays possible. The step itself is what is disabled or refused.
+- None of these pages wrap their fields in a `<form>`, so the native `required` attribute triggers no browser validation;
+  the page's own checks and the backend stay the authority.
+- Tests: `getByRole(..., { name })` ignores the aria-hidden asterisk, so names are unchanged; assert `toBeRequired()` (or
+  `aria-required="true"` on an editor) and, for a caption, `.MuiFormLabel-asterisk`. e2e page objects match labels with
+  `/^X\s*\*?$/`.
+
 ## Runtime feature flags: `CSM_MIGRATION_*`
 
 Alongside the per-page `CSM_PORTAL_FEATURE_OVERRIDES` map, customer-onboarding cutover features are gated by individual boolean `window.config` keys named `CSM_MIGRATION_<FEATURE>_ENABLED` — the **same name as the backend env var** that registers the route the feature calls, so a deployment flips one name on both sides. Each has a small reader in `src/config/<feature>Config.ts` (e.g. `onboardingStatusConfig.ts`'s `isOnboardingStatusEnabled()`) that returns true only for `true` or the string `"true"` (platform config injection often stringifies) and is read **at call time**, not module load like `apiConfig.ts`, so tests set `window.config` per case. Off is the default and must mean *no behaviour change*: the UI is not rendered **and** the data hook is disabled (`enabled: !!id && isXEnabled()`), so no request is ever made — a hook still has to be called unconditionally for stable hook order, hence gating inside it rather than around it. The key is declared on `Window["config"]` in `authConfig.ts`, listed in `public/config.js.example` and README's runtime-config table.

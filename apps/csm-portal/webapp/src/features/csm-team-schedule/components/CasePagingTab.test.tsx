@@ -343,8 +343,8 @@ describe("CasePagingTab", () => {
     window.localStorage.setItem("csm-ts.alert-settings.open", JSON.stringify(["CRE.where"]));
     window.localStorage.setItem(VIEW_KEY, "settings");
     render(<CasePagingTab onOpenRota={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("When a case is assigned to"), { target: { value: "Atlas" } });
-    fireEvent.change(screen.getByLabelText("send its alerts to"), { target: { value: "team:atlas" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "When a case is assigned to" }), { target: { value: "Atlas" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "send its alerts to" }), { target: { value: "team:atlas" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByRole("region", { name: "CRE changes to submit" })).toHaveTextContent("1 change not saved yet");
 

@@ -27,6 +27,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
+import RequiredMark from "@components/RequiredMark";
 import {
   useCaseAlertSettings,
   useTestCaseAlertRoom,
@@ -1353,12 +1354,18 @@ function RoomDialog({
           </label>
         )}
         <label>
-          Google Chat webhook URL
+          {/* Required for a new space only: a saved one keeps its URL when
+              this is left empty. */}
+          <span>
+            Google Chat webhook URL
+            {existing ? null : <RequiredMark />}
+          </span>
           <input
             type="password"
             autoComplete="off"
             spellCheck={false}
             value={url}
+            required={!existing}
             disabled={!webhooksEnabled}
             onChange={(e) => setUrl(e.target.value)}
             placeholder={`${WEBHOOK_PREFIX}v1/spaces/…`}
@@ -1778,9 +1785,19 @@ function RouteForm({ ladder, options, form, targetRef, busy, onError, onSaved }:
 
   return (
     <form className="cas-add cas-route-add" aria-label={`Add a ${ladder} redirect`} onSubmit={add}>
+      {/* Captions sit in a span so the asterisk stays beside them in the
+          label's flex column. aria-required rather than required: Add is what
+          holds back an incomplete redirect, not the browser's own check. */}
       <label>
-        {words.when}
-        <select value={group} onChange={(e) => form.pick(e.target.value, otherGroup)}>
+        <span>
+          {words.when}
+          <RequiredMark />
+        </span>
+        <select
+          value={group}
+          aria-required="true"
+          onChange={(e) => form.pick(e.target.value, otherGroup)}
+        >
           <option value="">Choose a team</option>
           {families.map((f) => {
             const inFamily = groups.filter((g) => g.family === f);
@@ -1808,10 +1825,14 @@ function RouteForm({ ladder, options, form, targetRef, busy, onError, onSaved }:
       </label>
       {group === OTHER_GROUP ? (
         <label>
-          Assignment group name
+          <span>
+            Assignment group name
+            <RequiredMark />
+          </span>
           <input
             type="text"
             value={otherGroup}
+            aria-required="true"
             maxLength={255}
             placeholder="As the incident carries it"
             onChange={(e) => form.setOtherGroup(e.target.value)}
@@ -1819,8 +1840,16 @@ function RouteForm({ ladder, options, form, targetRef, busy, onError, onSaved }:
         </label>
       ) : null}
       <label>
-        send its alerts to
-        <select ref={targetRef} value={target} onChange={(e) => form.setTarget(e.target.value)}>
+        <span>
+          send its alerts to
+          <RequiredMark />
+        </span>
+        <select
+          ref={targetRef}
+          value={target}
+          aria-required="true"
+          onChange={(e) => form.setTarget(e.target.value)}
+        >
           <option value="">{ladder === "SRE" ? "Choose an SRE team" : "Choose a CRE team"}</option>
           <optgroup label={`${ladder} teams`}>
             {teams.map((t) => (

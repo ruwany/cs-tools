@@ -118,8 +118,21 @@ vi.mock("@features/csm-announcements/components/CreateCustomerAnnouncementForm",
 // The rich-text editor isn't this dialog's concern (see EditorWithSourceToggle's
 // own tests) — stubbed to a plain textarea so edits are simple to simulate.
 vi.mock("@components/rich-text-editor/EditorWithSourceToggle", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="Description" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="Description"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 
@@ -388,6 +401,109 @@ describe("AnnouncementRequestDialog — draft", () => {
 
     expect(screen.getByRole("button", { name: /submit for approval/i })).toBeDisabled();
     expect(screen.getByText(/save your changes first/i)).toBeInTheDocument();
+  });
+});
+
+describe("AnnouncementRequestDialog — required fields", () => {
+  it("marks Subject and Description required on a draft, the description as needed to submit", () => {
+    mockGet({ state: "draft" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("textbox", { name: /^subject$/i })).toBeRequired();
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("Description")).toHaveAttribute("aria-required", "true");
+    expect(screen.getByText("Required to submit for approval.")).toBeInTheDocument();
+  });
+
+  it("still lets a draft save with an empty description (only Submit needs one)", () => {
+    mockGet({ state: "draft", description: "" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: /^subject$/i }), {
+      target: { value: "New subject" },
+    });
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /submit for approval/i })).toBeDisabled();
+  });
+
+  it("on an approved request, says the description is needed to publish and blocks Publish while the saved one is empty", () => {
+    mockGet({ state: "approved", description: "<p><br></p>", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByText("Required to publish.")).toBeInTheDocument();
+    const publishBtn = screen.getByRole("button", { name: /^publish$/i });
+    expect(publishBtn).toBeDisabled();
+    fireEvent.click(publishBtn);
+    expect(screen.queryByText("Confirm before sending")).not.toBeInTheDocument();
+  });
+
+  it("does not block Retry failed projects on an empty saved description (content is locked for the retry)", () => {
+    mockGet({
+      state: "approved",
+      description: "<p><br></p>",
+      resolvedProjectIds: ["p-1", "p-2"],
+      resolvedProjectCount: 2,
+    });
+    mockedPublish.mockReturnValue({
+      publishing: false,
+      progress: null,
+      succeededProjectIds: ["p-1"],
+      failedProjectIds: ["p-2"],
+      failedTagProjectIds: [],
+      published: null,
+      readyToPublish: true,
+      hydratingDeliveries: false,
+      hydrationFailed: false,
+      retryHydration: vi.fn(),
+      publishGivingUpOnFailed: vi.fn(),
+      handlePublish: vi.fn(),
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /retry failed projects/i })).toBeEnabled();
+  });
+
+  it("does not show the edit fields' markers on a read-only (pending approval) request", () => {
+    mockGet({ state: "pending_approval" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("textbox", { name: /^subject$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Required to submit for approval.")).not.toBeInTheDocument();
+  });
+
+  it("marks the Publish at picker required when scheduling", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule for later…" }));
+
+    const label = screen.getAllByText(/^Publish at/).find((el) => el.tagName === "LABEL");
+    expect(label).toBeDefined();
+    expect(label!.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+  });
+
+  it("marks the update editor aria-required and keeps Post update disabled for a cleared editor", () => {
+    mockGet({
+      state: "published",
+      resolvedProjectIds: ["p-1"],
+      resolvedProjectCount: 1,
+      publishedBy: "jane@example.com",
+      publishedAt: "2026-07-03T10:00:00Z",
+      publishedCaseIds: ["case-1"],
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    const editor = screen.getByLabelText("Description");
+    expect(editor).toHaveAttribute("aria-required", "true");
+    const postBtn = screen.getByRole("button", { name: /^post update$/i });
+    expect(postBtn).toBeDisabled();
+
+    // What a cleared rich editor sends; the backend only refuses blank text.
+    fireEvent.change(editor, { target: { value: "<p><br></p>" } });
+    expect(postBtn).toBeDisabled();
+
+    fireEvent.change(editor, { target: { value: "<p>A correction.</p>" } });
+    expect(postBtn).toBeEnabled();
   });
 });
 

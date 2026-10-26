@@ -38,6 +38,7 @@ import { RefreshCw, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
+import RequiredMark from "@components/RequiredMark";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import {
   formatAbsoluteForUser,
@@ -116,6 +117,12 @@ function whoWhen(who?: string | null, when?: string | null): string {
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
 function isEmptyHtml(html: string): boolean {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
+}
+
+/** An update with nothing to post: no text and no inline image. A cleared rich
+ * editor still sends `<p><br></p>`, which a plain trim lets through. */
+function isBlankUpdate(html: string): boolean {
+  return !/<img\b/i.test(html) && isEmptyHtml(html);
 }
 
 /**
@@ -400,6 +407,15 @@ export default function AnnouncementRequestDialog({
   // afterward. Locking here mirrors the same fix already made for the
   // create forms' own immediate-send retry (PR #1834).
   const contentLockedForRetry = request?.state === "approved" && publish.failedProjectIds.length > 0;
+  // Publish sends the saved description as every case's body, and an
+  // announcement case needs one, so an approved request saved with the
+  // description cleared cannot be published until it has one again.
+  const savedDescriptionEmpty = !!request && isEmptyHtml(request.description);
+  // A first publish (or a scheduled one) needs it. The two retries do not: content is
+  // locked while projects failed (contentLockedForRetry), and the security-label retry
+  // creates no case.
+  const publishNeedsDescription =
+    savedDescriptionEmpty && publish.failedProjectIds.length === 0 && publish.failedTagProjectIds.length === 0;
 
   const handleSaveContent = (): void => {
     if (!request) return;
@@ -524,11 +540,13 @@ export default function AnnouncementRequestDialog({
                   onChange={(e) => setSubject(e.target.value)}
                   fullWidth
                   size="small"
+                  required
                   disabled={contentLockedForRetry}
                 />
                 <Box>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
                     Description
+                    <RequiredMark />
                   </Typography>
                   <EditorWithSourceToggle
                     keepStyledHtmlAsSource
@@ -539,7 +557,13 @@ export default function AnnouncementRequestDialog({
                     maxHeight={320}
                     toolbarVariant="full"
                     disabled={contentLockedForRetry}
+                    ariaRequired
                   />
+                  {/* Saving accepts an empty description; the next step does not
+                      (submit runs a dry-run case, publish creates the real ones). */}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                    {request.state === "approved" ? "Required to publish." : "Required to submit for approval."}
+                  </Typography>
                 </Box>
                 {request.kind === "customer" && (
                   <FormControlLabel
@@ -775,6 +799,7 @@ export default function AnnouncementRequestDialog({
                     size="small"
                     onClick={() =>
                       !hasUnsavedChanges &&
+                      !publishNeedsDescription &&
                       claimsReady &&
                       isRequestCreator &&
                       publish.readyToPublish &&
@@ -783,6 +808,7 @@ export default function AnnouncementRequestDialog({
                     disabled={
                       publish.publishing ||
                       hasUnsavedChanges ||
+                      publishNeedsDescription ||
                       !claimsReady ||
                       !isRequestCreator ||
                       !publish.readyToPublish ||
@@ -910,6 +936,7 @@ export default function AnnouncementRequestDialog({
                           slotProps={{
                             textField: {
                               fullWidth: true,
+                              required: true,
                               size: "small",
                               error: !!scheduleInput && scheduleInputIsPast,
                               helperText: scheduleInputIsPast
@@ -923,7 +950,8 @@ export default function AnnouncementRequestDialog({
                         <Button
                           size="small"
                           variant="contained"
-                          disabled={!scheduleInput || scheduleInputIsPast || schedule.isPending}
+                          // A scheduled publish sends the saved description too.
+                          disabled={!scheduleInput || scheduleInputIsPast || schedule.isPending || savedDescriptionEmpty}
                           onClick={() => {
                             const iso = zonedInputToUtcIso(scheduleInput, scheduleTimeZone);
                             if (!iso) return;
@@ -1038,7 +1066,12 @@ export default function AnnouncementRequestDialog({
                 {(!claimsReady ||
                   (isRequestCreator && (request.publishedCaseIds ?? []).length > 0)) && (
                   <>
-                    <EditorWithSourceToggle keepStyledHtmlAsSource value={updateContent} onChange={setUpdateContent} />
+                    <EditorWithSourceToggle
+                      keepStyledHtmlAsSource
+                      value={updateContent}
+                      onChange={setUpdateContent}
+                      ariaRequired
+                    />
                     <Box>
                       <Button
                         variant="outlined"
@@ -1046,7 +1079,7 @@ export default function AnnouncementRequestDialog({
                         disabled={
                           !claimsReady ||
                           !isRequestCreator ||
-                          updateContent.trim().length === 0 ||
+                          isBlankUpdate(updateContent) ||
                           createUpdate.isPending ||
                           postUpdateComments.posting ||
                           (request.publishedCaseIds ?? []).length === 0 ||

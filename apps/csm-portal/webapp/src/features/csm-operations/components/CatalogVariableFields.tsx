@@ -27,6 +27,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import Editor from "@components/rich-text-editor/Editor";
 import type { BeCatalogItemVariable } from "@api/backend/types";
 import {
@@ -164,7 +165,8 @@ export default function CatalogVariableFields({
                   color="text.secondary"
                   sx={{ display: "block", mb: 0.5 }}
                 >
-                  {label} {required ? "*" : ""}
+                  {label}
+                  {required && <RequiredMark />}
                 </Typography>
                 <Box role="group" aria-label={label}>
                   <Editor
@@ -175,6 +177,7 @@ export default function CatalogVariableFields({
                     maxHeight="300px"
                     toolbarVariant="full"
                     disabled={readOnly}
+                    ariaRequired={required}
                   />
                 </Box>
               </Grid>

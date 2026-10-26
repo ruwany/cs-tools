@@ -24,6 +24,7 @@ import {
   fileOnlyRows,
   formatLadderValue,
   ladderKeysFor,
+  ladderValueRequired,
   parseDraft,
   runningLine,
   valuesToCopy,
@@ -84,6 +85,15 @@ describe("caseAlertLadderKeys", () => {
     expect(parseDraft(spec("timing.interval"), { ...draft, text: " 5m " })).toEqual({ ok: true, value: "5m" });
     expect(draftFor(spec("teams.rotaMembersToCall"), { LK: 2, USA: 1 }).text).toBe("LK=2, USA=1");
     expect(draftFor(spec("onLeave"), undefined).text).toBe("skip");
+  });
+
+  it("marks a value required exactly when an empty one is refused", () => {
+    for (const s of LADDER_KEYS) {
+      expect(ladderValueRequired(s), s.key).toBe(!parseDraft(s, draft).ok);
+    }
+    // A list, SHIFT=n pairs and a team map may be emptied; a number may not.
+    expect(ladderValueRequired(spec("teams.abts"))).toBe(false);
+    expect(ladderValueRequired(spec("teams.teamLeadsToCall"))).toBe(true);
   });
 
   it("words the file-only settings, and leaves the heads row to CRE", () => {

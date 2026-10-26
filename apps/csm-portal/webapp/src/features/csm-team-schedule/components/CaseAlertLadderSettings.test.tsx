@@ -258,6 +258,9 @@ describe("CaseAlertLadderSettings", () => {
     );
     const input = within(dialog).getByLabelText(/New value/);
     expect(input).toHaveFocus();
+    // A list may be saved empty, so it is not marked required.
+    expect(input).not.toBeRequired();
+    expect(input.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toBeNull();
     // It starts from the saved value.
     expect(input).toHaveValue("atlas, castor");
     fireEvent.change(input, { target: { value: "atlas, castor , draco," } });
@@ -292,8 +295,15 @@ describe("CaseAlertLadderSettings", () => {
   it("saves a head as a name and an email", async () => {
     render(<CaseAlertSettings chain="CRE" />);
     const { dialog } = openEdit("Head of CS");
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: " Kamala Silva " } });
-    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "kamala@example.test" } });
+    // Both are needed, and both carry the required asterisk (outside the name).
+    const name = within(dialog).getByRole("textbox", { name: "Name" });
+    const email = within(dialog).getByRole("textbox", { name: "Email" });
+    for (const field of [name, email]) {
+      expect(field).toBeRequired();
+      expect(field.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    }
+    fireEvent.change(name, { target: { value: " Kamala Silva " } });
+    fireEvent.change(email, { target: { value: "kamala@example.test" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
     await submit();
     expect(saveValues.mutateAsync).toHaveBeenCalledWith({
@@ -308,7 +318,10 @@ describe("CaseAlertLadderSettings", () => {
     );
     render(<CaseAlertSettings chain="CRE" />);
     const { dialog } = openEdit("Team leads to call");
-    const input = within(dialog).getByLabelText(/New value/);
+    const input = within(dialog).getByRole("spinbutton", { name: "New value" });
+    // A number cannot be left empty.
+    expect(input).toBeRequired();
+    expect(input.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toBeInTheDocument();
     expect(input).toHaveValue(3);
     expect(within(dialog).getByText(/0 to 20\./)).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "99" } });
@@ -324,7 +337,9 @@ describe("CaseAlertLadderSettings", () => {
   it("saves a pick from a few and a yes or no", async () => {
     render(<CaseAlertSettings chain="CRE" />);
     let { dialog } = openEdit("People on leave");
-    fireEvent.change(within(dialog).getByLabelText("New value"), { target: { value: "call" } });
+    const pick = within(dialog).getByRole("combobox", { name: "New value" });
+    expect(pick).toBeRequired();
+    fireEvent.change(pick, { target: { value: "call" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
 
     ({ dialog } = openEdit("Needs both to stop"));
