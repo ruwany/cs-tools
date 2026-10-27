@@ -5200,9 +5200,10 @@ read and create on a database without it (the older build never names it, so the
   called (a refusal after it would leave a record there with no PostgreSQL row), and again by both repository create
   paths before anything is written to PostgreSQL (the one after the previous system judges the caller's own identity,
   before it takes the system one). The customer portal's backend-v2 drops it anyway (its typed detail has no field for it).
-- **No side effect on a customer's proposed time.** Like every staff PATCH, recording the deviation stamps
-  `work_item.updated_by`. A proposal only waits in Customer Approval (see "A customer's proposed time"), where the deviation
-  cannot be recorded, so recording it cannot make a waiting proposal read "nobody is recorded".
+- **No side effect on a customer's proposed time.** A proposal only waits in Customer Approval (see "A customer's proposed
+  time"), where the deviation cannot be recorded, and its proposer is recorded in columns of its own (migration 0249, "Who
+  proposed it") that no staff PATCH writes, so neither recording the deviation nor any other staff save can make a waiting
+  proposal read "nobody is recorded".
 - **Not built:** no activity entry (change requests have no activity feed; the outbox trigger records the
   column change like any other), no bulk edit.
 - Tests: `rich_text_blank_test.go` (the blank rule against isBlankHtml's answers, and its linear time), `change_request_deviation_test.go`
