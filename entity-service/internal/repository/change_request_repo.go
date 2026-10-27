@@ -1866,6 +1866,16 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	if timeResp.disagree {
 		crSets = append(crSets, "customer_updated_date_confirmation = 'DISAGREE'")
 	}
+	// A plain Re-schedule (the customers asked again about a new window, nothing answered) starts a
+	// new round, so whatever time is stored is left over from the round before: the record of who
+	// proposed it (migration 0249) is voided the way the 0249 trigger voids it on entering Customer
+	// Approval -- who and when cleared, customer_proposed_for kept at the stored time so the legacy
+	// last-writer rule does not read it either. The state does not move here, so the trigger does not
+	// fire. A counter or a decline keeps the record: DISAGREE makes it history.
+	if timeResp.asksAgain && !timeResp.disagree {
+		crSets = append(crSets, "customer_proposed_by_user_id = NULL", "customer_proposed_on = NULL",
+			"customer_proposed_for = customer_updated_on")
+	}
 	if req.CustomerReviewRequired != nil {
 		addCR("customer_review_required = $%d", *req.CustomerReviewRequired)
 	}

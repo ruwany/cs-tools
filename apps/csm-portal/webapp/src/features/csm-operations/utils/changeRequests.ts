@@ -405,13 +405,13 @@ export function pendingCustomerProposal(
 export interface CustomerProposalProposer {
   name?: string;
   email?: string;
-  /** When it was proposed (the change request's last write), as the backend sent it. */
+  /** When it was proposed, as the backend sent it. */
   on?: string;
 }
 
 /**
  * The proposer of a stored time, or `null` when nobody is recorded as having proposed it. The backend
- * names one only when a registered contact of the project is on record as having written the time
+ * names one only when a registered contact of the project is on record as having proposed the time
  * (`proposerRecorded` says so); a date a user of the previous system wrote (WSO2 users do too), one
  * left over from an earlier cycle, or a sync rewrite is nobody to name, and the page must not guess:
  * it says nobody is recorded, and no answer is about it ({@link acceptProposedTimeBlockedReason}).
@@ -486,7 +486,7 @@ export const PROPOSER_NOT_RECORDED_ACCEPT_REASON =
 
 /** What the banner adds for a stored time nobody is recorded as having proposed: what it may be, and what is still true. */
 export const STORED_TIME_ADVICE =
-  "It may have been written by someone at WSO2, be left over from an earlier cycle, or be a customer's time that this change request was edited after (only the last edit is on record), " +
+  "It may have been written by someone at WSO2, be left over from an earlier cycle, or have been proposed by someone who is no longer a registered contact of the project, " +
   "so there is no proposal to accept. " +
   'The customer is still being asked to approve the planned time; use "Propose a different time" to ask them to approve another time, or this one.';
 

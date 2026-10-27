@@ -5178,7 +5178,8 @@ test.describe("migrated (legacy) change requests in the CSM portal (real stack)"
 // ---------------------------------------------------------------------------
 // A customer's PROPOSED TIME, on the REAL stack (the CSM webapp, the CSM backend, entity-service as csm_app with row-level
 // security, the database). The previous system's own mechanism: the customer's proposal is written to customer_updated_on (a planned
-// START) and nothing else, the change STAYS in Customer Approval with the planned window untouched, and WSO2 answers it from the
+// START), with the record of who proposed it in the same write (entity-service migration 0249), and nothing else, the change
+// STAYS in Customer Approval with the planned window untouched, and WSO2 answers it from the
 // change request: Accept proposed time (Scheduled in one step, no CAB, no new customer request) or Propose a different time
 // (the customer is asked again; keeping the window declines). The customer proposes the way the customer portal does (a PATCH
 // to entity-service with their own token, utils/customerPortalDecision.ts); every database assertion is on the rows the
@@ -5370,7 +5371,8 @@ test.describe("a customer's proposed time (real stack)", () => {
       const id = legacyId("CHG0039112");
       await psql(`update change_request set customer_updated_on = '2031-03-08 10:00:00+00', customer_updated_date_confirmation = NULL where id = '${id}'`);
       const read = (await staff("jane").get(id)).body as unknown as { customerProposal?: Record<string, unknown> };
-      // The last writer is the sync, not a registered contact: nobody is named, and Accept is not on offer, with the reason.
+      // No proposal recorded who proposed it (the shape of a time stored before entity-service migration 0249), so the legacy rule
+      // reads the last writer, which is the sync, not a registered contact: nobody is named, and Accept is not on offer, with the reason.
       expect(read.customerProposal).toMatchObject({ answer: "pending", startOn: "2031-03-08T10:00:00Z", proposerRecorded: false, canAccept: false });
       expect(read.customerProposal?.acceptBlockedReason).toBe(ACCEPT_PROPOSER_NOT_RECORDED);
       expect(read.customerProposal?.proposedByEmail).toBeUndefined();

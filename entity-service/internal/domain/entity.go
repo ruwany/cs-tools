@@ -5489,8 +5489,8 @@ type ChangeRequest struct {
 	// CustomerProposal is the conversation about a time the customer proposed
 	// (see ChangeRequestCustomerProposal): present on the PostgreSQL data source
 	// when customer_updated_on is set, absent otherwise. It is derived from the two
-	// synced columns customer_updated_on / customer_updated_date_confirmation
-	// and the approver rows; nothing extra is stored for it.
+	// synced columns customer_updated_on / customer_updated_date_confirmation,
+	// the approver rows and the record of who proposed the time (migration 0249).
 	CustomerProposal *ChangeRequestCustomerProposal `json:"customerProposal,omitempty"`
 
 	// The fields below are change-request field-parity additions. All 20 are
@@ -5566,8 +5566,9 @@ type ChangeRequest struct {
 // customer proposed for it. The previous system already modelled that conversation and
 // the synced schema carries it: change_request.customer_updated_on is the customer's
 // proposed plan START and change_request.customer_updated_date_confirmation is WSO2's
-// answer, AGREE or DISAGREE (the confirmation of the proposed date). Nothing here is
-// stored beyond those two columns; the object is derived on every read.
+// answer, AGREE or DISAGREE (the confirmation of the proposed date). Who proposed it is
+// recorded by the proposal itself (customer_proposed_by_user_id / customer_proposed_for /
+// customer_proposed_on, migration 0249). The object is derived on every read.
 //
 // Answer is one of
 //
@@ -5592,11 +5593,14 @@ type ChangeRequestCustomerProposal struct {
 	Answer string  `json:"answer"`
 	// ProposerRecorded says whether a registered contact of the change's project is
 	// recorded as having proposed the time: while the answer is "pending", true when the
-	// change's last writer (work_item.updated_by) is one, who is then the person who
-	// proposed it. Nothing else names a proposer (no comment, audit or other log is read)
-	// and nothing is added to record one. False when nobody is recorded -- a date a WSO2
-	// user wrote in the previous system, one left over from an older cycle, or a genuine
-	// proposal that a later write to the change replaced as last writer. A time nobody is
+	// proposal's own record (customer_proposed_by_user_id, written with the proposal) is
+	// about the stored time and names a contact who is still a registered contact of the
+	// project. A later write to the change by anybody else does not change it. A time
+	// stored before migration 0249 has no record and is read by the rule that held before
+	// it: the change's last writer (work_item.updated_by) when that is a registered
+	// contact. No comment, audit or other log is read. False when nobody is recorded -- a
+	// date a WSO2 user wrote in the previous system, one left over from an older cycle, a
+	// contact who has left the project. A time nobody is
 	// recorded as having proposed is not a proposal WSO2 can accept (CanAccept is false,
 	// Accept is refused) and the banner says the proposer is not recorded; proposing a
 	// different time is the way on, and the customer then approves it. Absent unless

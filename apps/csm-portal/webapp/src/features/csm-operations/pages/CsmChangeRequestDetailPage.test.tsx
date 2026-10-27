@@ -1652,7 +1652,8 @@ interface LcFake {
   /**
    * The previous system's own proposal pair, as the backend holds it (`customer_updated_on` as an RFC 3339 instant, and WSO2's
    * answer): the customer's proposed START and the Agree / Disagree. `proposer` is who the backend could still name
-   * (the change's last writer, a registered contact); null = not recorded.
+   * (the registered contact the proposal recorded; no staff PATCH of the fake clears it but a plain Re-schedule, which
+   * starts a new round, as in the backend); null = not recorded.
    */
   customerUpdatedOn: string | null;
   confirmation: "agree" | "disagree" | null;
@@ -2122,6 +2123,8 @@ function lcRescheduleOrCounter(patch: Record<string, unknown>): void {
     lcAskCustomersAgain();
   }
   if (pending) lc.confirmation = "disagree";
+  // A plain Re-schedule answers nothing and starts a new round: the stored time is nobody's proposal in it.
+  else if (changed) lc.proposer = null;
 }
 
 function lcSeed(

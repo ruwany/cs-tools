@@ -21965,7 +21965,8 @@ components:
       description: >-
         The conversation about a time the customer proposed, derived from two columns of the change
         request (customer_updated_on, the customer's proposed plan START, and
-        customer_updated_date_confirmation, WSO2's answer); present when customer_updated_on is
+        customer_updated_date_confirmation, WSO2's answer), the approver rows and the record of who
+        proposed the time (entity-service migration 0249); present when customer_updated_on is
         set. Pass-through of the entity service's detail. While `answer` is "pending" the
         planned window is still the one WSO2 planned: a proposal changes nothing until WSO2
         answers (Accept proposed time / Propose a different time, PATCH above).
@@ -21988,13 +21989,18 @@ components:
         proposerRecorded:
           type: boolean
           description: >-
-            While pending: true when the last writer of the change request (work_item.updated_by)
-            is a registered contact of its project, who is then recorded as having proposed the time.
-            Nothing else names a proposer: no comment, audit or other log is read, and nothing is added
-            to record one. False when nobody is recorded -- a date a WSO2 user wrote in the previous
-            system, one left from an older cycle, or a genuine proposal that a later write to the change
-            request replaced as last writer -- and the page must say the proposer is not recorded. Then
-            canAccept is false: Accept proposed time is refused with a 409
+            While pending: true when the customer's proposal recorded its proposer (the proposal writes
+            who proposed it, for which start and when, with the start itself), the record is about the
+            stored time, and that person is still a registered contact of the change request's project.
+            A later write by anybody else (a work note, an additional comment, the hold, a whole-form
+            resend, another writer's write to the work item) does not change it; only
+            a new round does: entering customer_approval, or a plain re-schedule, voids it. A time
+            stored before the record existed (entity-service migration 0249) has none and is read by
+            the rule that held before it: the change request's last writer (work_item.updated_by) when
+            that is a registered contact of the project. No comment, audit or other log is read. False
+            when nobody is recorded -- a date a WSO2 user wrote in the previous system, one left from an
+            older cycle, one whose contact has left the project -- and the page must say the proposer is
+            not recorded. Then canAccept is false: Accept proposed time is refused with a 409
             (change_request_proposer_not_recorded) and Propose a different time is a plain
             re-schedule that writes no answer, which the customers then approve.
         proposedByName:

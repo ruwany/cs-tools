@@ -2811,9 +2811,9 @@ already use — no route path, request, or response shape changed.
   Every comment type counts, work notes included, as in ServiceNow.
   Limits, each on purpose:
   - **Case-like work items only** (`caseLikeWorkItemTypes`; for `CreateComment`
-    the reference must be `case`). A change request's `updated_by` is the record
-    of who proposed a time (see "A customer's proposed time" below), so a comment
-    must never replace it; a conversation's `updated_on` is what its "resolved in
+    the reference must be `case`). A change request's `updated_by` still names who
+    proposed a time stored before migration 0249 (the legacy rule, see "A customer's
+    proposed time" below), so a comment must never replace it; a conversation's `updated_on` is what its "resolved in
     the last 30 days" count reads; an incident's `updated_by` is the last updater
     its events report. Comments on those keep exactly the behaviour they had.
   - **A live comment only.** A comment carrying its own past `createdOn` is
@@ -5652,8 +5652,9 @@ the case endpoints), `TestChangeRequestVisibilityLint_*`, `TestCRVisibility*`,
 
 ### A customer's proposed time (a mechanism the previous system already had)
 
-The previous system already models the conversation and the synced schema carries it -- no column, table,
-type, state or migration is added by this feature:
+The previous system already models the conversation and the synced schema carries it; the one thing it
+cannot say, who proposed the time, is recorded in three columns of our own (migration 0249, see **Who
+proposed it** below). No table, type or state is added:
 
 * `change_request.customer_updated_on` (migration 0043) = the customer's
   proposed plan **START**;
@@ -5697,11 +5698,11 @@ an infinite date.
 
 | act | who / wire | writes |
 |---|---|---|
-| customer proposes | external `PATCH {plannedStartOn, plannedEndOn?}` | `customer_updated_on = start`, answer cleared. **Nothing else**: the change stays in Customer Approval, the planned window, the customers' request, every stage / approver row untouched. A proposal is a START: the planned LENGTH is kept; an end that rides with it must be start + length |
+| customer proposes | external `PATCH {plannedStartOn, plannedEndOn?}` | `customer_updated_on = start`, answer cleared, and in the same UPDATE the record of who proposed it (`customer_proposed_by_user_id` = the caller's user, `customer_proposed_for` = start, `customer_proposed_on` = now). **Nothing else**: the change stays in Customer Approval, the planned window, the customers' request, every stage / approver row untouched. A proposal is a START: the planned LENGTH is kept; an end that rides with it must be start + length |
 | Accept proposed time | staff `PATCH {confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn, expectedPlannedStartOn, expectedPlannedEndOn}` and nothing else, **only for a time a registered contact of the project is recorded as having proposed** (else 409 `change_request_proposer_not_recorded`) | ONE UPDATE: `start_on = proposal`, `end_on = proposal + planned length`, `AGREE`, state `SCHEDULED`; the customers' still-requested rows are closed by `reconcileStaleApprovers`. No CAB, no second ask. **Not written**: `is_customer_approval_required` (no staff action records the customer's approval; the proposal is the customer's own consent), `customer_approval_required`, any stage. `{state: "scheduled"}` stays refused for every staff caller: Accept is another door whose only precondition is the customer's own recorded proposal |
 | Propose a different time | staff `PATCH {state: "authorize", plannedStartOn?, plannedEndOn?, expectedCustomerUpdatedOn, expectedPlannedStartOn?, expectedPlannedEndOn?}` while a proposal waits (one a registered contact is recorded as having made) | the window as sent, `DISAGREE`; the customers' request is replaced by a fresh one (`cancelLiveCustomerStages` + `provisionCustomerStage`); the state does not move; no CAB |
 | decline | the same with no window (or the planned window restated) | `DISAGREE` only: no state, no stage, no approver row; the customers keep their live request; nobody has to be found to ask |
-| Re-schedule | the same with no proposal waiting -- **including a stored time nobody is recorded as having proposed**: it is not answered, so no `DISAGREE` is written against it | the window, the same re-ask, no CAB, no flag (above) |
+| Re-schedule | the same with no proposal waiting -- **including a stored time nobody is recorded as having proposed**: it is not answered, so no `DISAGREE` is written against it | the window, the same re-ask, no CAB, no flag (above); the record of who proposed the stored time is voided (a new round, see **Who proposed it**) |
 
 A staff `{state: "authorize"}` that finds a proposal waiting must name it (`expectedCustomerUpdatedOn`): an old or
 racing client never answers a proposal it did not see (409). One sent when none waits is a 409 too. **A stored time
@@ -5710,7 +5711,8 @@ nobody is recorded as having proposed is not a proposal waiting**: a Re-schedule
 "the time stored on this change request changed after you opened it"), writes no answer and is refused (400) when it
 carries no window ("no customer is recorded as having proposed the time stored on this change request, so there is no
 proposal to decline: send the new planned window to re-schedule it") instead of declining a date nobody proposed.
-The stored time stays as it was: the Re-schedule changes the planned window only.
+The stored time stays as it was: the Re-schedule changes the planned window, and voids the record of who proposed the
+stored time (see **Who proposed it**), so it can never count as a proposal of the new round.
 
 **The contract's refusals** (status and exact text; the first failing check wins and nothing is written):
 
@@ -5760,7 +5762,7 @@ seconds only when there are some, so it goes back as `expectedCustomerUpdatedOn`
 and, for a staff reader, `proposedByName` / `proposedByEmail` / `proposedOn` (only when `proposerRecorded`), `canAccept`
 and `acceptBlockedReason` (on hold / the proposed start has passed / no length to keep / the window would end beyond the range every window is held to, in the words of the refusal); for
 an external reader `proposedByViewer` and no names. **A stored time that nobody is recorded as having proposed** (a date a
-WSO2 user wrote in the previous system, an old one, or -- see **Who proposed it** for when -- a proposal edited over since)
+WSO2 user wrote in the previous system, an old one, one whose contact has left the project -- see **Who proposed it**)
 reads, for staff, `answer: pending` with `proposerRecorded: false`, `canAccept: false` and `acceptBlockedReason` the
 refusal's own words ("nobody is recorded as having proposed this time ..."), and the pages say the proposer is not
 recorded; **for a customer it reads `answer: "unanswered"` (history) with nothing that says a time waits** -- no customer
@@ -5770,45 +5772,82 @@ read, and what comes out is a handful of derived facts, never a row. `legalNextS
 
 **Who proposed it** (`resolveProposer` for the acts, `readProposer` for the read;
 `TestChangeRequestProposalIntegration_AcceptNeedsARecordedProposer`, `..._AStoredTimeNobodyProposedIsNoProposalToAnswer`,
-`..._AStoredTimeNobodyProposedInEveryShape`, `..._AGenuineProposalAfterAnUnrelatedStaffEditReadsNotRecorded`,
-`..._TheProposerIsTheLastWriterAndNothingElse`, `..._NoStatementReadsACommentToNameAProposer`, the predicate matrix rows
-M1a-M10d, and the database-free `change_request_proposer_test.go`). The predicate says a time is stored and unanswered; it
-cannot say who wrote it, and the previous system lets WSO2 users write the same column. A waiting time is a customer's
-**proposal** -- answerable by WSO2 -- only when **the last writer of the change** (`work_item.updated_by`, read before the
-act's own write) is a **registered PORTAL_USER contact of the change's project** (the test of the customer's own answer,
-`callerIsRegisteredPortalContact`; a contact who has since left the project is not one). **Nothing else names a proposer**
-(the user's decision, 2026-10-08): no comment, audit, outbox or other log row is read, because those rows record what the
-system did and are no reference for a business rule such as whether Accept is allowed; and nothing is added to record it (no
-column, table, migration or row of ours). The comment that trigger 0053 writes on a parent record for each proposal is still
-written (above) and is never read; `TestProposalFile_NoSQLReadsTheCommentTable` (every SQL literal of the proposal file) and the
-statement-tracing integration test fail if a query of the proposer path reads the comment table.
+`..._AStoredTimeNobodyProposedInEveryShape`, `..._AGenuineProposalStaysRecordedAfterAnyStaffWrite`,
+`..._TheProposerIsTheRecordNotTheLastWriter`, `..._TheRecordNamesTheProposerOfTheStoredTimeOnly`,
+`..._ALegacyProposalIsReadByItsLastWriter`, `..._APlainRescheduleVoidsTheRecord`,
+`..._ACustomerCannotClaimAStoredTimeByWritingItAgain`, `..._NoStatementReadsACommentToNameAProposer`,
+`..._ProposerMigrationIsSafeToRunAgain`, `..._TheRecordedUserIsAForeignKeyClearedOnDelete`, the predicate matrix rows
+M1a-M10e, and the database-free
+`change_request_proposer_test.go`). The predicate says a time is stored and unanswered; it
+cannot say who wrote it, and the previous system lets WSO2 users write the same column. **The proposal records its proposer**
+(the user's decision, 2026-10-26, which reverses the 2026-10-08 one to store nothing; migration
+`0249_change_request_customer_proposer.sql`): three columns on `change_request`, written by `proposeCustomerTime` in the same
+UPDATE that writes `customer_updated_on`:
 
-*Which writes replace `work_item.updated_by` on a change request:* `patchChangeRequestTx` stamps the caller on it
-unconditionally, so **every PATCH** does (a work note, an additional comment, the hold, an assignee, a title: any staff edit;
-and a customer's answer or proposal, through `lockWorkItemKeepingWriter`, which is also Accept's first statement), and so
-does whatever else writes the work item row directly (the sync loader, as the previous system's user; its own stamp names
-nobody, and neither does a blank value). The approval decision route does not touch it, and **neither does a comment**: `CreateComment` / `CreateCaseComment` stamp `updated_by` only on case-like work items (see "Adding a comment to a case stamps its `updated_on`/`updated_by`"), never on a change request, so a comment can neither erase a customer's proposal nor make its writer the recorded proposer (`TestCommentUpdatedOnIntegration_OnlyCaseLikeWorkItemsAreStamped`). The acts that ANSWER a waiting time
-stamp the staff member before they look, so they read the last writer **before their own write**: `lockWorkItemKeepingWriter`
-(Accept, a customer's proposal) and `lockChangeRequestForPatch` (a staff `{state: "authorize"}`,
+* `customer_proposed_by_user_id` -- the proposing contact's `"user"` id (`REFERENCES "user"(id) ON DELETE SET NULL`, pinned
+  from the catalog by `..._TheRecordedUserIsAForeignKeyClearedOnDelete`);
+* `customer_proposed_for` -- the proposed start the record is about;
+* `customer_proposed_on` -- when it was proposed (`now()` of the proposal's transaction).
+
+A waiting time is a customer's **proposal** -- answerable by WSO2 -- only when the record names a contact, is **about the stored
+time itself** (`customer_proposed_for = customer_updated_on`, the same instant) and that contact is **now a registered
+PORTAL_USER contact of the change's current project** (the test of the customer's own answer, `callerIsRegisteredPortalContact`,
+by the contact's `"user".email`; a contact who has since left the project is not one). No other staff act writes the record
+(a work note, an additional comment, the hold on and off, a whole-form resend -- in Customer Approval the approved-content
+lock refuses any field that would change, an assignee included; an Accept or a `DISAGREE` leaves it as history), except the
+two that start a new round, which **void** it: they clear who and when and set `customer_proposed_for` to the stored time, so a time left over from an
+earlier round reads "not recorded" rather than as the old proposer's, and is not read by the legacy rule either.
+
+* **Entering Customer Approval**: the 0249 trigger `change_request_void_customer_proposer` (`BEFORE UPDATE OF state`, fires when
+  `state` becomes `CUSTOMER_APPROVAL` from anything else). A change re-enters Customer Approval when an old-flow Re-schedule still
+  in flight finishes through the CAB (`TestChangeRequestFlowIntegration_StaleApprovals_OldFlowRescheduleStillFinishesThroughTheCAB`),
+  or through another writer (a manual fix, an import); the trigger covers both.
+* **A plain Re-schedule** (`{state: "authorize"}` with a new window while no proposal waits, so nothing is answered): it asks the
+  customers again without the state moving, so the trigger does not fire, and `patchChangeRequestTx` voids the record in its own
+  UPDATE of `change_request` (`..._APlainRescheduleVoidsTheRecord`). Without it a record that did not count at the Re-schedule
+  (its contact had left the project, or another approval was being asked) would count again later, and Accept would apply the
+  earlier round's time over the window the customers were asked about. A counter-proposal or a decline keeps the record.
+
+A stored time that another writer moved off its record (`customer_proposed_for` differs) names nobody, and so does a record whose
+user is gone. **No comment, audit, outbox or other log row is read** by the acts or the read model to name a
+proposer (the notice drainer's only input is the outbox row, whose snapshot carries the 0249 record itself; see Notices below), because those rows
+record what the system did and are no reference for a business rule such as whether Accept is allowed. The comment that trigger
+0053 writes on a parent record for each proposal is still written (above) and is never read;
+`TestProposalFile_NoSQLReadsTheCommentTable` (every SQL literal of the proposal file) and the statement-tracing integration test
+fail if a query of the proposer path reads the comment table. The tracing test runs a record that counts, the same after a staff
+work note, a legacy row, and a record whose contact has left the project under a parent record whose comment names that contact
+(the record path naming nobody); the re-entry and contact-left cases are also run under such a parent record and read "not
+recorded".
+
+**Legacy: a time stored before 0249** (`customer_proposed_for` NULL -- a proposal made before the deploy and still waiting, or a
+date the previous system wrote) has no record, and for it alone the rule that held until 0249 still holds: the proposer is **the
+last writer of the change** (`work_item.updated_by`, read before the act's own write) when that writer is a registered PORTAL_USER
+contact of the project. So a migrated date reads "not recorded" exactly as before (its last writer is the sync's stamp or a WSO2
+user), and a pre-0249 proposal stays acceptable until somebody else writes to the change, which still makes it read "not
+recorded" (`..._ALegacyProposalIsReadByItsLastWriter`); the next proposal on that change records itself. The migration does not
+backfill: a last writer is not evidence enough to write a record from. *Which writes replace `work_item.updated_by`:*
+`patchChangeRequestTx` stamps the caller on it unconditionally, so **every PATCH** does (a work note, an additional comment, the
+hold, an assignee, a title; and a customer's answer or proposal, through `lockWorkItemKeepingWriter`, which is also Accept's first
+statement), and so does whatever else writes the work item row directly (the sync loader, whose own stamp names nobody, as a blank
+value does not). The approval decision route does not touch it, and **neither does a comment**: `CreateComment` / `CreateCaseComment` stamp `updated_by` only on case-like work items (see "Adding a comment to a case stamps its `updated_on`/`updated_by`"), never on a change request (`TestCommentUpdatedOnIntegration_OnlyCaseLikeWorkItemsAreStamped`). The acts that ANSWER a waiting time
+stamp the staff member before they look, so for a legacy row they read the last writer **before their own write**:
+`lockWorkItemKeepingWriter` (Accept, a customer's proposal) and `lockChangeRequestForPatch` (a staff `{state: "authorize"}`,
 `changeRequestGateSnapshot.priorWriter`) hand it back as a `lastWriter` (whose `read` flag tells "the column held nobody" from
-"it was never looked at": the latter is a refusal of the caller's bug, never a quiet "nobody"), and the proposer is resolved
-from that, never from the column afterwards (reading it afterwards would make every proposal "not recorded" the moment WSO2
-answers it). The answer's own stamp is harmless to the next reader: after an Accept or a `DISAGREE` nothing waits any more, and
-the next proposal is a new write by a customer.
+"it was never looked at": the latter is a refusal of the caller's bug, never a quiet "nobody", and `resolveProposer` refuses it
+before any statement whatever the row turns out to be). That plumbing exists for the legacy rule only.
 
-**The cost, stated plainly.** Any other write to the change after a customer's proposal (a staff work note, putting the change
-on hold and taking it off, assigning an engineer: whatever replaces `work_item.updated_by`) makes that genuine proposal read
-**"not recorded"**, with or without a parent record. Accept is then unavailable (409 `change_request_proposer_not_recorded`,
-`canAccept: false`), the customer who proposed it is told nothing waits on their account (`answer: unanswered`), and WSO2 can
-still **Propose a different time**, which is then a plain Re-schedule (no answer is written against a time nobody is recorded
-as having proposed; the customers are asked again) -- and the customer then **approves that time: one extra customer approval,
-by design.** The customer can also propose a different start, which records them afresh (the stored time itself is refused to them: "that time is already stored ... although nobody is recorded as having proposed it"). The same holds for a time that someone at WSO2
-wrote in the previous system, one left over from an earlier cycle, and the sync's own writes: Accept is refused (no staff action
-stands in for the customer's consent), a Re-schedule over it is a plain Re-schedule that never writes `DISAGREE` against it, a
-request with no window is a 400 ("there is no proposal to decline"), and a customer is never told it waits for WSO2. Why this is
-accepted: the rule has to hold on data the synced schema already carries, with no column or row of ours, and the previous system is not
-used in parallel after the cutover (the dual-write is a fallback), so a time a WSO2 user wrote there is migrated history, not a
-daily event.
+**What "not recorded" costs now.** A customer's own proposal is no longer lost to a staff save: after a work note, the hold on
+and off, a whole-form resend, or a write to the work item by another writer (an assignee set by an integration, say) it
+still reads `proposerRecorded: true` and `canAccept: true`, the read model names the contact and when, and Accept applies it (`..._AGenuineProposalStaysRecordedAfterAnyStaffWrite`). "Not
+recorded" is left for a time that no current contact of the project is recorded as having proposed in this round: one someone at
+WSO2 wrote in the previous system, one left over
+from an earlier cycle (voided on re-entry or by a plain Re-schedule), one whose contact has left the project, one another writer moved off its record, the
+sync's own writes, and a legacy proposal that a later write replaced as last writer. For those, Accept is refused (409
+`change_request_proposer_not_recorded`, `canAccept: false`: no staff action stands in for the customer's consent), a customer is
+never told it waits for WSO2 (`answer: unanswered`), a Re-schedule over it is a plain Re-schedule that never writes `DISAGREE`
+against it, a request with no window is a 400 ("there is no proposal to decline"), and **Propose a different time** asks the
+customers again, who then approve that time. The customer can also propose a different start, which records them afresh (the
+stored time itself is refused to them: "that time is already stored ... although nobody is recorded as having proposed it").
 
 **What is mirrored / what is not** (`DATA_SOURCE=postgres-servicenow-dual-write`): the previous system's PATCH API has no field for
 the two columns, so **proposals and WSO2's answers are PostgreSQL-only until the sync stops, and while the sync runs it can
@@ -5831,7 +5870,18 @@ the previous system directly refuses `confirmCustomerUpdatedDate` / `expectedCus
 proposed date is answered in that system) and forwards proposals and Re-schedules as ever. Notices (`CR_NOTICES_ENABLED`, off by
 default): the existing `planDateNotice` turns apply unchanged and no notice kind or table was added -- a proposal tells
 the "Devops Approval" team (a team nobody belongs to in this database has no recipient: the banner and the Awaiting chip are
-the signal), Accept tells the designated customers "accepted the plan start date"; **a different time and a Decline are the
+the signal). That notice's actor -- the name it carries, and the WSO2 test that suppresses it
+(`sys_updated_byNOT LIKE@wso2.com`) -- is **the contact the proposal recorded**, read from the proposal's own outbox row:
+when its snapshot carries a non-empty `customer_proposed_by_user_id` whose `customer_proposed_for` is `customer_updated_on`
+itself (compared as instants), `crPlanDateActor` names that user with `CRNoticeRepository.UserActor`, by the rule `Details` names
+a last writer by (last name first; WSO2 when their email, else user name, is a wso2.com address). What it reads there is the
+0249 record itself, as the proposal's UPDATE wrote it: the outbox is the drainer's only input, and the acts and the read model
+still never read the outbox (**Who proposed it**). So a staff save between a
+proposal and the drain neither suppresses the notice nor names the staff member (`TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast`,
+`TestChangeRequestProposalIntegration_TheProposalNoticeNamesTheRecordedProposer`). Only a row with no such record -- a date
+written before 0249, a date another writer moved off its record, a record the 0249 trigger voided -- still takes its actor from
+`work_item.updated_by` read when the outbox is drained, the KNOWN GAP `crPlanDateActor` keeps for those
+(`TestPlanDate_AStaleRecordFallsBackToTheLastWriter`, `TestPlanDate_NoRecordFallsBackToTheLastWriter`). Accept tells the designated customers "accepted the plan start date"; **a different time and a Decline are the
 same turn**: both write `customer_updated_date_confirmation = DISAGREE`, which is the previous system's own Disagree, so both send the
 designated customers the one Disagree notice ("Reject the proposed plan start date" / "WSO2 Team request to change the plan
 start date"). That mail carries no time of the conversation at all: the new window of a different time is NOT in it (the
@@ -6033,8 +6083,10 @@ decision route on their own `REQUESTED` row, like anyone.
   `plannedStartOn is the planned start already: propose a different start`), nor the standing
   proposal (400 `that time is already proposed and is waiting for WSO2's response`) nor one WSO2
   already declined (400 `WSO2 asked for a different time than that one: propose another start`).
-  Then ONE write: `customer_updated_on = start`, the answer cleared. The change stays in
-  Customer Approval; the planned window, every stage and approver row and the state are untouched.
+  Then ONE write: `customer_updated_on = start`, the answer cleared, and the record of who
+  proposed it (`customer_proposed_by_user_id` / `_for` / `_on`, see **Who proposed it** above).
+  The change stays in Customer Approval; the planned window, every stage and approver row and
+  the state are untouched.
 * **The planned window is parsed here, not by Postgres** (`change_request_window.go`,
   applied at the top of `patchChangeRequestTx` for every caller, and on create). It used
   to be bound as `$n::text::timestamptz`, which accepts `infinity`, `-infinity`, `now`,
@@ -10268,7 +10320,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | A proposed time on a change request that is not in Customer Approval, or that nobody has been asked to approve | `change_request_not_proposable` | 409 |
 | A proposed time while an approval that is not the customer's is also being asked (the customer's own answer is still possible; only the proposal is refused) | `change_request_proposal_not_now` | 409 |
 | A proposed time on a change request with no planned window to move (a proposal is a new start, the planned length is kept; the customer's answer is still possible) | `change_request_no_planned_window` | 409 |
-| WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, or a genuine proposal that a later write to the change replaced as its last writer): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
+| WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, proposed by a contact who has since left the project, or -- a time stored before migration 0249 only -- a proposal that a later write to the change replaced as its last writer): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
 | A registered contact holding no `REQUESTED` row on the customer stage that is LIVE (registered after the request went out, or a row of theirs cancelled directly): proposing, or answering on it. A request that was withdrawn (a sibling's answer settled the stage) leaves no live stage and is a 409 instead: `change_request_approval_not_pending` for an answer, `change_request_not_proposable` for a proposal | `change_request_not_asked` | 403 |
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |

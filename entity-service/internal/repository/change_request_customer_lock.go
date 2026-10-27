@@ -458,9 +458,10 @@ func lockChangeRequestForPatch(ctx context.Context, tx pgx.Tx, id string) (chang
 	// conflicts with itself), which is all this lock is for.
 	//
 	// updated_by comes back with the lock: it is the last writer BEFORE this PATCH's own
-	// UPDATE of the row (which always stamps the caller). A staff answer to a time the
-	// customer proposed has to know who proposed it, and the only place that is still
-	// intact is here (changeRequestGateSnapshot.priorWriter).
+	// UPDATE of the row (which always stamps the caller). A staff answer to a time stored
+	// before migration 0249 (no record of its proposer) still names the proposer by the last
+	// writer, and the only place that is still intact is here
+	// (changeRequestGateSnapshot.priorWriter).
 	err := tx.QueryRow(ctx,
 		`SELECT id::text, updated_by FROM work_item WHERE id = $1::uuid AND type = 'CHANGE_REQUEST' FOR NO KEY UPDATE`, id).Scan(&locked, &updatedBy)
 	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {

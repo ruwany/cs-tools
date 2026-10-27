@@ -7216,7 +7216,9 @@ paths:
 
         A customer's proposed time (see the customerProposal read model). A customer proposes a
         START in the Customer Portal: it is written to customer_updated_on (a column the
-        previous system also fills) and nothing else; the change request stays in customer_approval with its planned
+        previous system also fills) with, in the same write, the record of who proposed it
+        (customer_proposed_by_user_id / customer_proposed_for / customer_proposed_on, migration
+        0249), and nothing else; the change request stays in customer_approval with its planned
         window and the customers' request untouched, and waits for WSO2. WSO2 answers with this
         PATCH, naming the proposal (expectedCustomerUpdatedOn) and, for Accept, the planned window
         the page showed (expectedPlannedStartOn / expectedPlannedEndOn): ACCEPT PROPOSED TIME is
@@ -7301,7 +7303,9 @@ paths:
         A proposed window, from a registered contact the customer's approval has been
         asked of (the same test as customerCanAnswer: a REQUESTED approval on the live
         Customer Approval stage) while the change request is in customer_approval, is the
-        a PROPOSAL: it writes the proposed START to customer_updated_on and nothing else (the
+        a PROPOSAL: it writes the proposed START to customer_updated_on and, in the same write, the
+        record of who proposed it (customer_proposed_by_user_id / customer_proposed_for /
+        customer_proposed_on, migration 0249), and nothing else (the
         change request stays in customer_approval, its planned window and the customers' request
         untouched) and waits for WSO2's answer. The planned LENGTH is kept: the portal sends the
         start plus the end that keeps it, and any other end is a 400 ("a proposed time moves the start
@@ -23834,8 +23838,9 @@ components:
       description: >-
         What the change request says about a time the customer proposed for it, derived on every
         read from two columns of the change request (customer_updated_on: the customer's proposed plan START;
-        customer_updated_date_confirmation: WSO2's answer, AGREE / DISAGREE) and the approver rows;
-        nothing extra is stored. Present on the PostgreSQL data source when customer_updated_on is
+        customer_updated_date_confirmation: WSO2's answer, AGREE / DISAGREE), the approver rows and
+        the record of who proposed the time (customer_proposed_by_user_id / customer_proposed_for /
+        customer_proposed_on, migration 0249). Present on the PostgreSQL data source when customer_updated_on is
         set. While `answer` is "pending" the planned window (plannedStartOn / plannedEndOn) is still
         the one WSO2 planned: a proposal changes nothing until WSO2 answers.
       properties:
@@ -23860,12 +23865,17 @@ components:
         proposerRecorded:
           type: boolean
           description: >-
-            While pending: true when the last writer of the change request (work_item.updated_by) is
-            a registered contact of the change request's project, who is then recorded as having
-            proposed the time. Nothing else names a proposer: no comment, audit or other log is read,
-            and nothing is added to record one. False when nobody is recorded -- a date a WSO2 user
-            wrote in the previous system, one left from an older cycle, or a genuine proposal that a
-            later write to the change request replaced as last writer -- and the page must say the
+            While pending: true when the customer's proposal recorded its proposer (the proposal writes
+            who proposed it, for which start and when, with the start itself), the record is about the
+            stored time, and that person is still a registered contact of the change request's project.
+            A later write by anybody else (a work note, an additional comment, the hold, a whole-form
+            resend, another writer's write to the work item) does not change it;
+            only a new round does: entering customer_approval, or a plain re-schedule, voids it. A
+            time stored before the record existed (migration 0249) has none and is read by the rule
+            that held before it: the change request's last writer (work_item.updated_by) when that
+            is a registered contact of the project. No comment, audit or other log is read. False
+            when nobody is recorded -- a date a WSO2 user wrote in the previous system, one left from
+            an older cycle, one whose contact has left the project -- and the page must say the
             proposer is not recorded. Then canAccept is false: Accept proposed time is refused (409
             change_request_proposer_not_recorded) and proposing a different time is a plain
             re-schedule that writes no answer, which the customers then approve. Present only for a

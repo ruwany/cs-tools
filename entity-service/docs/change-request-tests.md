@@ -256,20 +256,26 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestProposalIntegration_RacesHaveOneWinner
 - TestChangeRequestProposalIntegration_OutboxRowsCarryTheTurnsOfTheNotices
 
-**`change_request_proposal_proposer_integration_test.go`** (integration, 8)
+**`change_request_proposal_proposer_integration_test.go`** (integration, 14)
 - TestChangeRequestProposalIntegration_AcceptNeedsARecordedProposer
 - TestChangeRequestProposalIntegration_AStoredTimeNobodyProposedIsNoProposalToAnswer
-- TestChangeRequestProposalIntegration_AGenuineProposalAfterAnUnrelatedStaffEditReadsNotRecorded
-- TestChangeRequestProposalIntegration_TheProposerIsTheLastWriterAndNothingElse
+- TestChangeRequestProposalIntegration_AGenuineProposalStaysRecordedAfterAnyStaffWrite
+- TestChangeRequestProposalIntegration_TheProposerIsTheRecordNotTheLastWriter
+- TestChangeRequestProposalIntegration_TheRecordNamesTheProposerOfTheStoredTimeOnly
+- TestChangeRequestProposalIntegration_ALegacyProposalIsReadByItsLastWriter
 - TestChangeRequestProposalIntegration_AStoredTimeNobodyProposedInEveryShape
 - TestChangeRequestProposalIntegration_NoStatementReadsACommentToNameAProposer
 - TestChangeRequestProposalIntegration_ARecordedProposerIsAcceptedEndToEnd
 - TestChangeRequestProposalIntegration_ACustomerCannotClaimAStoredTimeByWritingItAgain
+- TestChangeRequestProposalIntegration_APlainRescheduleVoidsTheRecord
+- TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain
+- TestChangeRequestProposalIntegration_TheRecordedUserIsAForeignKeyClearedOnDelete
+- TestChangeRequestProposalIntegration_TheProposalNoticeNamesTheRecordedProposer
 
 **`change_request_proposer_test.go`** (unit, 4)
 - TestNewLastWriter
-- TestResolveProposer_TheLastWriterAndNothingElse
-- TestReadProposer_ReadsTheLastWriterAndNothingElse
+- TestResolveProposer_TheRecordAndTheLegacyLastWriter
+- TestReadProposer_ReadsTheRecordAndTheLegacyLastWriter
 - TestProposalFile_NoSQLReadsTheCommentTable
 
 **`change_request_repo_integration_test.go`** (integration, 101)
@@ -579,7 +585,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 **`entity-service/internal/service/change_request_service_lock_test.go`** (1)
 - TestChangeRequestService_PatchChangeRequest_RefusalIsNeverMirrored
 
-**`entity-service/internal/service/cr_notice_service_test.go`** (13)
+**`entity-service/internal/service/cr_notice_service_test.go`** (16)
 - TestApprovalNotice_StateTable
 - TestApprovalNotice_OnlyOnTransition
 - TestTeamFromGitReference
@@ -591,6 +597,9 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestPlanDate_ADeclineSendsTheSameNoticeAsADifferentTime
 - TestPlanDate_WSO2ActorSuppressesCustomerProposed
 - TestPlanDate_CustomerProposedNotifiesInternalGroup
+- TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast
+- TestPlanDate_AStaleRecordFallsBackToTheLastWriter
+- TestPlanDate_NoRecordFallsBackToTheLastWriter
 - TestHandleChange_IgnoresUnrelatedEntityType
 - TestHandleChange_SecondBranchRunsAfterFirstFails
 

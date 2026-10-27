@@ -87,7 +87,10 @@
 //     allowlist verdict: `answer: "pending"` only in Customer Approval, with a proposed
 //     start that differs from the planned start, no answer, and no REQUESTED approver row
 //     on anything but a customer stage (an unknown group blocks it too); `proposedBy*` only
-//     while the last writer is a registered contact (`proposerKnown`). WSO2 answers it with
+//     while a registered contact is recorded as the proposer (`proposerKnown`: the proposal
+//     records its proposer, and a later staff edit does not change it, as in the backend;
+//     a plain Re-schedule starts a new round and clears it).
+//     WSO2 answers it with
 //     (1) ACCEPT: PATCH {confirmCustomerUpdatedDate:"agree", expectedCustomerUpdatedOn,
 //     expectedPlannedStartOn, expectedPlannedEndOn} (all three required) -- the proposal becomes the planned
 //     window (the planned length kept), the answer is agree and the change is `scheduled`
@@ -690,7 +693,7 @@ export interface FakeChangeRequestApi {
    * backend's), `startOn` (RFC 3339 or "YYYY-MM-DD HH:MM:SS", UTC) must be a future start that is not the planned one. It writes the
    * proposed START to `customer_updated_on` and clears the standing answer -- and NOTHING else: the change stays in Customer
    * Approval, the planned window stays what WSO2 planned, no stage and no approver row is touched. `contact` is on record as the
-   * proposer (the change's last writer is a registered contact). The open page is not refreshed: reload it.
+   * proposer (the backend records it with the proposal; later staff edits leave it). The open page is not refreshed: reload it.
    */
   customerProposes(contact: FakeUser, startOn: string): void;
   /**
@@ -856,8 +859,9 @@ export async function installFakeChangeRequestApi(
   const vocabulary: FakeTag[] = [...FAKE_TAG_VOCABULARY];
   let plannedStartOn = "2030-03-01 09:00:00";
   let plannedEndOn = "2030-03-01 11:00:00";
-  // The previous system's own proposal pair (`customer_updated_on`, as an RFC 3339 instant, and WSO2's answer), and whether the change's last
-  // writer is still a registered contact of the project (then the backend can name the proposer).
+  // The previous system's own proposal pair (`customer_updated_on`, as an RFC 3339 instant, and WSO2's answer), and the registered contact
+  // the proposal recorded as its proposer (then the backend can name them; no staff PATCH of the fake clears it but a plain Re-schedule,
+  // which starts a new round, as in the backend).
   let customerUpdatedOn: string | null = null;
   let confirmation: "agree" | "disagree" | null = null;
   let proposer: FakeUser | null = null;
@@ -1905,6 +1909,8 @@ export async function installFakeChangeRequestApi(
             askCustomersAgain();
           }
           if (answeringProposal) confirmation = "disagree";
+          // A plain Re-schedule answers nothing and starts a new round: the stored time is nobody's proposal in it.
+          else if (changed) proposer = null;
         } else if (target === "assess") {
           if (type === "standard") enter(afterInternalApproval());
           else if (type === "emergency") {

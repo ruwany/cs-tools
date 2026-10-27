@@ -203,7 +203,9 @@ type lockedWorkItem struct {
 	// priorWriter is work_item.updated_by as it stood BEFORE this transaction's own
 	// write, i.e. the last writer the caller found. The write below replaces it with the
 	// caller, so a reader that needs "who wrote the change before me" has to take it from
-	// here: after the call the column only ever says the caller (see resolveProposer).
+	// here: after the call the column only ever says the caller. resolveProposer reads it
+	// for a legacy proposal (a time stored before migration 0249, which has no record of its
+	// proposer).
 	priorWriter lastWriter
 }
 

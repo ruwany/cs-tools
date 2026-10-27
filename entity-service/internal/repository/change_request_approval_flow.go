@@ -928,7 +928,8 @@ type changeRequestGateSnapshot struct {
 	// priorWriter is work_item.updated_by as the PATCH found it, before its own write
 	// replaced it (set by lockChangeRequestForPatch only; read=false from every other reader
 	// of the snapshot, which run after a write of their own). A staff time response reads
-	// the proposer of a waiting time from it, never from the column afterwards.
+	// the proposer of a LEGACY waiting time (one stored before migration 0249, with no record
+	// of its proposer) from it, never from the column afterwards.
 	priorWriter lastWriter
 }
 

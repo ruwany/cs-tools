@@ -224,12 +224,13 @@ From the detail page a CS engineer can:
     been updated, so a refused attempt leaves no note behind.
 
   A date a WSO2 user wrote in the previous system, or one left over from an
-  earlier round, looks like a proposal too. The only thing on record about who
-  proposed a time is who last changed the change request, and only when that is
-  one of the project's registered contacts: so a customer's genuine proposal
-  also reads "nobody is recorded" once anyone at WSO2 has edited the change
-  request since (an unrelated edit too, such as a plan or the assigned
-  engineer). When nobody is recorded as having proposed the stored time, it is
+  earlier round, looks like a proposal too. A customer's proposal records who
+  proposed it, and the page names them while they are still one of the
+  project's registered contacts; what you do on the change request afterwards
+  (a work note, a comment, putting it on hold) does not change that. A time
+  proposed before that record was kept is judged by who last changed the change request
+  instead, so it reads "nobody is recorded" once anyone at WSO2 has edited the
+  change request since. When nobody is recorded as having proposed the stored time, it is
   not a proposal and nothing waits for your answer: the banner reads "A time is stored on this change request" ("A time is
   stored (...) but nobody is recorded as having proposed it."), the header stays
   at "Awaiting Customer Approval", and **Accept proposed time** is disabled with
