@@ -5602,8 +5602,10 @@ type ChangeRequestCustomerProposal struct {
 	// (customer_proposed_for NULL: a time stored before migration 0249, or one written later
 	// by another writer on a change that has had no proposal since it entered Customer
 	// Approval) is read by the rule that held before 0249: the change's last writer
-	// (work_item.updated_by) when that is a registered contact. No comment, audit or other
-	// log is read. False when nobody is recorded -- a date a WSO2 user wrote in the
+	// (work_item.updated_by) when that is a registered contact; a write that replaces that
+	// writer records them first when they have a user record (migration 0250), so such a
+	// proposal stays recorded whoever writes to the change after it. No comment, audit or
+	// other log is read. False when nobody is recorded -- a date a WSO2 user wrote in the
 	// previous system, one left over from an older cycle, a stored time another writer
 	// moved off its record, a contact who has left the project or whose user was deleted.
 	// A time nobody is recorded as having proposed is not a proposal WSO2 can accept

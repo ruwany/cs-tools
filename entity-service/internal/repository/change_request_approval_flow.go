@@ -929,7 +929,9 @@ type changeRequestGateSnapshot struct {
 	// replaced it (set by lockChangeRequestForPatch only; read=false from every other reader
 	// of the snapshot, which run after a write of their own). A staff time response reads
 	// the proposer of a LEGACY waiting time (one stored before migration 0249, with no record
-	// of its proposer) from it, never from the column afterwards.
+	// of its proposer) from it when the write recorded nothing, never from the column
+	// afterwards: migration 0250's trigger records the replaced writer when the rule names
+	// them and they have a "user" row.
 	priorWriter lastWriter
 }
 

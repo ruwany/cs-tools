@@ -44,8 +44,9 @@ import (
 // while it is about the stored time and names a registered contact of the project; entering Customer
 // Approval voids it, and so does a plain Re-schedule. A time
 // stored before 0249 has no record (customer_proposed_for NULL): for it alone the proposer is still
-// the LAST WRITER (work_item.updated_by) read BEFORE the answer's own write replaces it. No comment,
-// audit, outbox or other row names a proposer.
+// the LAST WRITER (work_item.updated_by) read BEFORE the answer's own write replaces it, and a write
+// that replaces that writer records them first (migration 0250). No comment, audit, outbox or other
+// row names a proposer.
 
 // msgAcceptNobodyRecordedFull is the whole refusal: pinned word for word because the pages and
 // the contract show it.
@@ -523,9 +524,10 @@ func TestChangeRequestProposalIntegration_TheRecordNamesTheProposerOfTheStoredTi
 
 // LEGACY: a time stored before migration 0249 has no record (customer_proposed_for NULL), and for
 // it the rule that held until then still holds: the proposer is the change's last writer, read
-// before the act's own write, when that writer is a registered contact of the project. A proposal
-// made before the deploy and still waiting stays acceptable until somebody else writes to the
-// change; a migrated date stays "not recorded" exactly as before; the next proposal records itself.
+// before the act's own write, when that writer is a registered contact of the project. Since
+// migration 0250 a write that replaces such a writer records them first, so a proposal made before
+// the deploy and still waiting stays acceptable whoever writes to the change after it; a migrated
+// date stays "not recorded" exactly as before; the next proposal records itself.
 func TestChangeRequestProposalIntegration_ALegacyProposalIsReadByItsLastWriter(t *testing.T) {
 	// legacyProposal is a change in Customer Approval holding the start a contact proposed before
 	// 0249: the date and the contact as the last writer, and no record.
@@ -566,26 +568,33 @@ func TestChangeRequestProposalIntegration_ALegacyProposalIsReadByItsLastWriter(t
 		}
 	})
 
-	t.Run("Accept reads the last writer from before its own write, and writes no record", func(t *testing.T) {
+	t.Run("Accept of a legacy proposal: its own first write records the last writer it replaces (0250), then applies it", func(t *testing.T) {
 		f, id := legacyProposal(t, crFlowEmail(crScopeUserA1))
 		if _, err := f.staffPatch(id, crFlowPeerAID, f.acceptReq(id)); err != nil {
 			t.Fatalf("Accept of a legacy proposal: %v", err)
 		}
 		f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
 		f.wantPlanned(id, "after Accept", rsStart2, endFor(rsStart2))
-		f.wantProposalRecord(id, "after Accept", "", "")
+		f.wantProposalRecord(id, "after Accept", crScopeUserA1, rsStart2)
 	})
 
-	t.Run("a staff write after it still replaces the last writer: the old cost, for a legacy row only", func(t *testing.T) {
+	t.Run("a staff write after it no longer loses the proposer: migration 0250 records them first", func(t *testing.T) {
 		f, id := legacyProposal(t, crFlowEmail(crScopeUserA1))
+		before := f.proposalOf(id)
+		if before == nil || before.ProposedOn == nil {
+			t.Fatalf("customerProposal of a legacy proposal = %+v, want the last writer and when they wrote", before)
+		}
 		if _, err := f.staffPatch(id, crFlowPeerBID, domain.PatchChangeRequestRequest{WorkNote: sp("looking at it")}); err != nil {
 			t.Fatalf("a staff work note: %v", err)
 		}
+		f.wantProposalRecord(id, "after a staff work note", crScopeUserA1, rsStart2)
 		p := f.proposalOf(id)
-		if p == nil || p.ProposerRecorded == nil || *p.ProposerRecorded || p.CanAccept == nil || *p.CanAccept {
-			t.Fatalf("customerProposal of a legacy proposal after a staff write = %+v, want nobody recorded", p)
+		if p == nil || p.ProposerRecorded == nil || !*p.ProposerRecorded || p.ProposedByEmail == nil || *p.ProposedByEmail != crFlowEmail(crScopeUserA1) ||
+			p.ProposedOn == nil || *p.ProposedOn != *before.ProposedOn || p.CanAccept == nil || !*p.CanAccept {
+			t.Fatalf("customerProposal of a legacy proposal after a staff write = %+v, want Alice recorded as proposing it at %s and Accept possible", p, *before.ProposedOn)
 		}
-		f.wantNoProposalToAnswer(id, rsStart2)
+		f.mustAccept(id)
+		f.wantPlanned(id, "after Accept", rsStart2, endFor(rsStart2))
 	})
 
 	t.Run("a migrated-shaped row (a stored date, no record, a staff member as the last writer) reads not recorded, as before", func(t *testing.T) {

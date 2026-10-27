@@ -2811,11 +2811,12 @@ already use — no route path, request, or response shape changed.
   Every comment type counts, work notes included, as in ServiceNow.
   Limits, each on purpose:
   - **Case-like work items only** (`caseLikeWorkItemTypes`; for `CreateComment`
-    the reference must be `case`). A change request's `updated_by` still names who
+    the reference must be `case`). A change request's `updated_by` names who
     proposed a time stored before migration 0249 (the legacy rule, see "A customer's
-    proposed time" below), so a comment must never replace it; a conversation's `updated_on` is what its "resolved in
-    the last 30 days" count reads; an incident's `updated_by` is the last updater
-    its events report. Comments on those keep exactly the behaviour they had.
+    proposed time" below; since migration 0250 a write that replaces it records that
+    proposer first); a conversation's `updated_on` is what its "resolved in the last
+    30 days" count reads; an incident's `updated_by` is the last updater its events
+    report. Comments on those keep exactly the behaviour they had.
   - **A live comment only.** A comment carrying its own past `createdOn` is
     ServiceNow history being mirrored in at dual-write case creation
     (`mirrorInitialSNComments`), not something happening now, so it does not move
@@ -5205,7 +5206,8 @@ read and create on a database without it (the older build never names it, so the
   proposed it") that no ordinary staff edit writes: the only staff PATCH that writes them is a plain Re-schedule, which
   voids them, and only when no proposal waits (the 0249 trigger voids them too, on entering Customer Approval). So neither
   recording the deviation nor any other staff save can make a recorded proposal read "nobody is recorded". A legacy one
-  (stored with no record, see "Legacy" there) is still read by its last writer, so any staff save still un-records it.
+  (stored with no record, see "Legacy" there) is read by its last writer, and since migration 0250 a staff save records that
+  writer as its proposer first (when they have a `"user"` row) instead of un-recording it.
 - **Not built:** no activity entry (change requests have no activity feed; the outbox trigger records the
   column change like any other), no bulk edit.
 - Tests: `rich_text_blank_test.go` (the blank rule against isBlankHtml's answers, and its linear time), `change_request_deviation_test.go`
@@ -5777,9 +5779,10 @@ read, and what comes out is a handful of derived facts, never a row. `legalNextS
 `TestChangeRequestProposalIntegration_AcceptNeedsARecordedProposer`, `..._AStoredTimeNobodyProposedIsNoProposalToAnswer`,
 `..._AStoredTimeNobodyProposedInEveryShape`, `..._AGenuineProposalStaysRecordedAfterAnyStaffWrite`,
 `..._TheProposerIsTheRecordNotTheLastWriter`, `..._TheRecordNamesTheProposerOfTheStoredTimeOnly`,
-`..._ALegacyProposalIsReadByItsLastWriter`, `..._APlainRescheduleVoidsTheRecord`,
+`..._ALegacyProposalIsReadByItsLastWriter`, `..._AWriteKeepsALegacyProposer`, `..._APlainRescheduleVoidsTheRecord`,
 `..._ACustomerCannotClaimAStoredTimeByWritingItAgain`, `..._NoStatementReadsACommentToNameAProposer`,
-`..._ProposerMigrationIsSafeToRunAgain`, `..._TheRecordedUserIsAForeignKeyClearedOnDelete`, the predicate matrix rows
+`..._ProposerMigrationIsSafeToRunAgain`, `..._KeepLegacyProposerMigrationIsSafeToRunAgain`,
+`..._TheRecordedUserIsAForeignKeyClearedOnDelete`, the predicate matrix rows
 M1a-M10e, and the database-free
 `change_request_proposer_test.go`). The predicate says a time is stored and unanswered; it
 cannot say who wrote it, and the previous system lets WSO2 users write the same column. **The proposal records its proposer**
@@ -5828,9 +5831,70 @@ has had no proposal since it entered Customer Approval: entering it with no time
 Re-schedule that voids an empty one) has no record, and for it alone the rule that held until 0249 still holds: the proposer is **the
 last writer of the change** (`work_item.updated_by`, read before the act's own write) when that writer is a registered PORTAL_USER
 contact of the project. So a migrated date reads "not recorded" exactly as before (its last writer is the sync's stamp or a WSO2
-user), and a pre-0249 proposal stays acceptable until somebody else writes to the change, which still makes it read "not
-recorded" (`..._ALegacyProposalIsReadByItsLastWriter`); the next proposal on that change records itself. The migration does not
-backfill: a last writer is not evidence enough to write a record from. *Which writes replace `work_item.updated_by`:*
+user), and a pre-0249 proposal stays acceptable whoever writes to the change after it: **migration 0250** records it in the
+write that would have replaced its proposer (`..._ALegacyProposalIsReadByItsLastWriter`, `..._AWriteKeepsALegacyProposer`).
+Its trigger, `work_item_keep_legacy_customer_proposer` (`AFTER UPDATE OF updated_by ON work_item`, change requests only, when the
+writer changes), writes the record the proposal would have written -- the replaced writer's `"user"` (earliest by `created_on`,
+then `id`, as `readProposer` names them), the stored time, and `OLD.updated_on` (the time the read model already showed) -- when
+the change is in Customer Approval with an unanswered, finite stored time that differs from the planned start and has no record,
+and the replaced writer is a registered PORTAL_USER contact of the project with a `"user"` row (`callerIsRegisteredPortalContact`'s
+join, in SQL).
+
+It records nothing where the rule names nobody, and it freezes whatever the rule names at that moment, a wrong name included. Every
+writer in this service stamps `work_item.updated_by` before it writes the stored time, so the rule's name is the proposer's. A
+writer that changes `customer_updated_on` directly while a contact is the last writer (the sync, a manual fix, an import) can make
+the rule name that contact for a time they did not propose; the old rule showed that until the next save, and the trigger keeps it.
+Such writers must stamp `work_item.updated_by` first, and must update `work_item` before `change_request` in one transaction: a
+writer that locks `change_request` first can deadlock with a staff save that the trigger turns into a `change_request` write (one
+side is aborted, 40P01). It covers every writer from the moment it is applied (this build, GitHub, the sync, an older build still
+running), which is why it is a trigger and not a one-time update. One gap while an older build runs: once a staff save has recorded
+a waiting proposal, a later proposal the older build stores on the same change carries no record, is not about the recorded time,
+and reads "nobody is recorded" (staff can propose a different time). Its write touches only the three record columns: the outbox
+row it leaves is no turn for the notices (`TestPlanDate_KeepingALegacyProposerSendsNothing`) and the GitHub queue ignores it. It
+runs as the writer, so a role that writes `work_item` rows of change requests needs SELECT on `"user"`, `project_contact`,
+`project_contact_group`, `project_group_role` and `project_role`, and UPDATE on `change_request`: without them that role's writes
+of a change request fail. Still lost: a legacy proposal whose writer was replaced before 0250 was applied, and one whose contact
+has no `"user"` row (nothing to record them by). Deduplicating users can clear a record: deleting the earliest copy of a `"user"`
+row sets the record's user to NULL (`ON DELETE SET NULL`), and the proposal then reads "nobody is recorded". The next proposal on
+that change records itself. Apply migrations 0249 and 0250 before deploying the build that records proposers, and deploy it
+straight after (the gap above): its detail read and the proposal name 0249's columns (the older build never does), and 0250 needs
+0249 and refuses to run without it. The migration sets `lock_timeout` (5s, as 0207 does): creating the trigger locks `work_item`
+against writes until the commit. It is safe to run again (`CREATE OR REPLACE TRIGGER`, which takes no ACCESS EXCLUSIVE lock).
+
+**The trigger is temporary**: once the build that records proposers is deployed and nothing writes `customer_updated_on` directly
+(the sync can, while it runs), nothing stores a time without a record, so the set it protects only shrinks. Drop it in a new
+migration (`DROP TRIGGER IF EXISTS work_item_keep_legacy_customer_proposer ON work_item; DROP FUNCTION IF EXISTS
+trg_work_item_keep_legacy_customer_proposer();`) once this reads 0 on every environment. Run it as a superuser, or after
+`SELECT set_config('app.is_internal', 'true', false)`: `change_request` is FORCE ROW LEVEL SECURITY and otherwise reads 0. It
+counts the rows the trigger would act on:
+
+```sql
+SELECT count(*)
+  FROM change_request cr
+  JOIN work_item wi ON wi.id = cr.id
+ WHERE cr.state::text = 'CUSTOMER_APPROVAL'
+   AND cr.customer_proposed_for IS NULL
+   AND cr.customer_updated_on IS NOT NULL
+   AND isfinite(cr.customer_updated_on)
+   AND cr.customer_updated_date_confirmation IS NULL
+   AND cr.customer_updated_on IS DISTINCT FROM cr.start_on
+   AND EXISTS (SELECT 1 FROM "user" u
+                WHERE LOWER(u.email) = LOWER(btrim(wi.updated_by, E' \t\n\r\f' || chr(11))))
+   AND EXISTS (SELECT 1
+                 FROM project_contact pc
+                 JOIN project_contact_group pcg ON pcg.project_contact_id = pc.id
+                 JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
+                 JOIN project_role pr ON pr.id = pgr.project_role_id
+                WHERE pc.project_id = wi.project_id
+                  AND LOWER(pc.email) = LOWER(btrim(wi.updated_by, E' \t\n\r\f' || chr(11)))
+                  AND pc.state = 'REGISTERED'::project_contact_state_enum
+                  AND pr.role = 'PORTAL_USER'::project_role_enum);
+```
+
+Until then it holds a second copy, in SQL, of the registered-contact test (`callerIsRegisteredPortalContact`): change the two
+together. Its cost is a filter on the work item row for every other type, one primary-key lookup per change request whose last
+writer changes and, when its time waits, a `"user"` lookup by email and the contact check.
+*Which writes replace `work_item.updated_by`:*
 `patchChangeRequestTx` stamps the caller on it unconditionally, so **every PATCH** does (a work note, an additional comment, the
 hold, an assignee, a title; and a customer's answer or proposal, through `lockWorkItemKeepingWriter`, which is also Accept's first
 statement), and so does whatever else writes the work item row directly (the sync loader, whose own stamp names nobody, as a blank
@@ -5839,7 +5903,10 @@ stamp the staff member before they look, so for a legacy row they read the last 
 `lockWorkItemKeepingWriter` (Accept, a customer's proposal) and `lockChangeRequestForPatch` (a staff `{state: "authorize"}`,
 `changeRequestGateSnapshot.priorWriter`) hand it back as a `lastWriter` (whose `read` flag tells "the column held nobody" from
 "it was never looked at": the latter is a refusal of the caller's bug, never a quiet "nobody", and `resolveProposer` refuses it
-before any statement whatever the row turns out to be). That plumbing exists for the legacy rule only.
+before any statement whatever the row turns out to be). That stamp is itself a write that replaces the last writer, so migration
+0250's trigger records them first when the rule names them, and the act then reads the record; the kept writer decides only when
+nothing was recorded (the stamp did not change the writer, the rule names nobody, or the contact has no `"user"` row). That
+plumbing exists for the legacy rule only.
 
 **What "not recorded" costs now.** A customer's own proposal is no longer lost to a staff save: after a work note, the hold on
 and off, a whole-form resend, or a write to the work item by another writer (an assignee set by an integration, say) it
@@ -5847,7 +5914,8 @@ still reads `proposerRecorded: true` and `canAccept: true`, the read model names
 recorded" is left for a time that no current contact of the project is recorded as having proposed in this round: one someone at
 WSO2 wrote in the previous system, one left over
 from an earlier cycle (voided on re-entry or by a plain Re-schedule), one whose contact has left the project, one another writer moved off its record, the
-sync's own writes, and a legacy proposal that a later write replaced as last writer. For those, Accept is refused (409
+sync's own writes, and a legacy proposal whose proposer a later write replaced before migration 0250 was applied (or whose
+contact has no user record). For those, Accept is refused (409
 `change_request_proposer_not_recorded`, `canAccept: false`: no staff action stands in for the customer's consent), a customer is
 never told it waits for WSO2 (`answer: unanswered`), a Re-schedule over it is a plain Re-schedule that never writes `DISAGREE`
 against it, a request with no window is a 400 ("there is no proposal to decline"), and **Propose a different time** asks the
@@ -5901,6 +5969,8 @@ send byte-identical notices, none carrying a date) and, on real outbox rows, by
 counts EVERY table around each act -- a proposal adds the `event_outbox` row of any change_request update, the 0053 comment under
 a parent (and its GitHub queue row when linked); Accept the outbox row (+ the queue row when linked); a different time / a
 Re-schedule the outbox row and the one customer stage with one row per contact; a decline the outbox row; a refused act nothing.
+On a legacy row (no record, the proposing contact as the last writer) the first write by anybody else also leaves the
+`event_outbox` row of migration 0250's record (the three record columns only, no notice; `..._AWriteKeepsALegacyProposer`).
 On a migrated change in Customer Approval whose customer stage the previous system wrote (unlabeled, the customer group), the customer's
 first act still gives it the one labelled stage plus one `REQUESTED` row per registered contact (the existing behaviour of
 every customer act on such a row, `change_request_synced_stages_integration_test.go`); Accept then leaves the previous system's
@@ -10325,7 +10395,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | A proposed time on a change request that is not in Customer Approval, or that nobody has been asked to approve | `change_request_not_proposable` | 409 |
 | A proposed time while an approval that is not the customer's is also being asked (the customer's own answer is still possible; only the proposal is refused) | `change_request_proposal_not_now` | 409 |
 | A proposed time on a change request with no planned window to move (a proposal is a new start, the planned length is kept; the customer's answer is still possible) | `change_request_no_planned_window` | 409 |
-| WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, proposed by a contact who has since left the project, or -- a time stored before migration 0249 only -- a proposal that a later write to the change replaced as its last writer): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
+| WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, proposed by a contact who has since left the project, or -- a time stored before migration 0249 only -- a proposal whose proposer a later write replaced as last writer before migration 0250 was applied, or whose contact has no user record): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
 | A registered contact holding no `REQUESTED` row on the customer stage that is LIVE (registered after the request went out, or a row of theirs cancelled directly): proposing, or answering on it. A request that was withdrawn (a sibling's answer settled the stage) leaves no live stage and is a 409 instead: `change_request_approval_not_pending` for an answer, `change_request_not_proposable` for a proposal | `change_request_not_asked` | 403 |
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |

@@ -23875,7 +23875,9 @@ components:
             or one written later by another writer on a change request that has had no proposal
             since it entered customer_approval) is read by the rule that held before the record
             existed: the change request's last writer (work_item.updated_by) when that is a
-            registered contact of the project. No comment, audit or other log is read. False
+            registered contact of the project; a write that replaces that writer records them as
+            the proposer first when they have a user record (migration 0250), so such a proposal
+            stays recorded whoever writes after it. No comment, audit or other log is read. False
             when nobody is recorded -- a date a WSO2 user wrote in the previous system, one left from
             an older cycle, one whose contact has left the project -- and the page must say the
             proposer is not recorded. Then canAccept is false: Accept proposed time is refused (409

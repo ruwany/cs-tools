@@ -228,10 +228,13 @@ From the detail page a CS engineer can:
   proposed it, and the page names them while they are still one of the
   project's registered contacts; what you do on the change request afterwards
   (a work note, a comment, putting it on hold) does not change that. A time
-  proposed before that record was kept is judged by who last changed the change request
-  instead, so it reads "nobody is recorded" once anyone at WSO2 has edited the
-  change request since. When nobody is recorded as having proposed the stored time, it is
-  not a proposal and nothing waits for your answer: the banner reads "A time is stored on this change request" ("A time is
+  proposed before that record was kept is judged by who last changed the change
+  request instead (when that is one of the project's registered contacts); a
+  change by anyone else now records that contact as its proposer first, and it
+  reads "nobody is recorded" if someone else changed the change request before
+  proposers were recorded. When nobody is recorded as having proposed the stored
+  time, it is not a proposal and nothing waits for your answer: the banner reads
+  "A time is stored on this change request" ("A time is
   stored (...) but nobody is recorded as having proposed it."), the header stays
   at "Awaiting Customer Approval", and **Accept proposed time** is disabled with
   the reason, because no staff action stands in for the customer's own answer.

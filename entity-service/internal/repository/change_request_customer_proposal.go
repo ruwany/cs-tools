@@ -93,8 +93,10 @@ import (
 // another writer on a change that has had no proposal since it entered Customer Approval (the
 // void leaves the column NULL when no time is stored). For it, and only for it, the proposer is
 // still the LAST WRITER of the change (work_item.updated_by, read before the act's own write), the
-// rule that held until 0249: so a migrated date reads "not recorded" exactly as before, and a
-// pre-0249 proposal stays acceptable until somebody else writes to the change.
+// rule that held until 0249: so a migrated date reads "not recorded" exactly as before. A write
+// that replaces that last writer records them first when the rule names them (migration 0250's
+// trigger, temporary: see its header), so a pre-0249 proposal stays acceptable whoever writes to
+// the change after it.
 //
 // A date that someone at WSO2 wrote in the previous system, one left over from an earlier
 // cycle, and one whose contact has left the project are alike "not recorded". Then no staff
@@ -468,6 +470,13 @@ func proposerFromRecord(ctx context.Context, q crQuerier, project *string, rec p
 // change's project, and nobody otherwise. A blank writer, a WSO2 user, a contact who has left, a
 // contact of another project and the sync's own stamp all name nobody. Only the writer's email is
 // looked at.
+//
+// Migration 0250's trigger (work_item_keep_legacy_customer_proposer) applies the same rule, in
+// SQL, in the write that replaces the last writer of a change in Customer Approval whose stored
+// time waits unanswered: when this rule names that writer (and they have a "user" row), it writes
+// the record for them first, so the rule stops reading the row before a later writer could change
+// its answer. Keep the two in step: the contact test is callerIsRegisteredPortalContact's join.
+// The trigger is temporary: the migration's header says when to drop it.
 func proposerFromWriter(ctx context.Context, q crQuerier, project *string, writer string) (proposer, error) {
 	email := strings.TrimSpace(writer)
 	if email == "" {
@@ -537,7 +546,7 @@ func readProposer(ctx context.Context, q crQuerier, id string) (proposer, error)
 	if err := q.QueryRow(ctx, `
 		SELECT COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
 		FROM "user" u WHERE LOWER(u.email) = LOWER($1)
-		ORDER BY u.created_on ASC LIMIT 1`, p.email).Scan(&name); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		ORDER BY u.created_on ASC, u.id ASC LIMIT 1`, p.email).Scan(&name); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return p, fmt.Errorf("read the proposer's name: %w", err)
 	}
 	p.name = stringOrEmpty(name)
@@ -556,8 +565,8 @@ func readProposer(ctx context.Context, q crQuerier, id string) (proposer, error)
 // blocked (the date is there for them to deal with), and a customer reads it as
 // "unanswered", history, so no page tells them WSO2 is deciding on a time they did not
 // propose. A customer's own proposal stays recorded as theirs whatever is written to the change
-// after it (readProposer), unless it is a legacy one (made before migration 0249), which a
-// later write by anybody else still replaces as last writer.
+// after it (readProposer). So does a legacy one (made before migration 0249, read by its last
+// writer): a write that replaces that writer records them first (migration 0250's trigger).
 //
 // The predicate reads approver rows of every stage, so it runs under the system
 // identity: the caller was already shown this change request by the visibility-gated
@@ -879,8 +888,9 @@ func validateAcceptRequest(req domain.PatchChangeRequestRequest) (proposed, expS
 // work_item UPDATE, the first statement); it is in Customer Approval (409); a proposal
 // waits (409); the proposal is the one the caller saw (409); the planned window is the one
 // the caller saw (409); a registered contact of the project is recorded as the proposer (409,
-// errorCode change_request_proposer_not_recorded: resolveProposer, from the record; for a
-// legacy row, from the last writer read BEFORE this request's own write replaced it); the
+// errorCode change_request_proposer_not_recorded: resolveProposer, from the record -- for a
+// legacy row, the one migration 0250's trigger writes in this request's own first write when
+// the rule names the last writer it replaces, else that last writer, read BEFORE the write); the
 // change is not on hold (400, the state-change gate's own text); the proposed start has not
 // passed (409); the planned window
 // has a length to keep (409); the window the proposal gives is within the range every planned
@@ -891,8 +901,9 @@ func acceptCustomerProposal(ctx context.Context, tx pgx.Tx, id string, req domai
 		return "", err
 	}
 	// work_item first, change_request second: the order every other PATCH takes. The lock stamps
-	// the caller on work_item.updated_by, so the last writer it found is kept for the check below
-	// (the legacy rule reads it).
+	// the caller on work_item.updated_by, which fires migration 0250's trigger (it records the
+	// writer it replaces when the rule names them); the last writer it found is kept for the
+	// check below, which the legacy rule reads when nothing was recorded.
 	locked, err := lockWorkItemKeepingWriter(ctx, tx, id, actorEmail)
 	if err != nil {
 		return "", err
@@ -1013,7 +1024,9 @@ func planStaffTimeResponse(ctx context.Context, tx pgx.Tx, id string, req domain
 	// cycle) is no proposal: it is never answered, so a plain Re-schedule stays a plain
 	// Re-schedule (no answer is written against a time nobody proposed) and a request with no
 	// window is refused instead of declining it. For a legacy row the last writer is the one this
-	// PATCH's lock found (snap.priorWriter): its own write has stamped the caller since.
+	// PATCH's lock found (snap.priorWriter): its own write has stamped the caller since, and
+	// migration 0250's trigger recorded that writer first if the rule names them (resolveProposer
+	// then reads the record).
 	waits := false
 	if f.pending {
 		who, err := resolveProposer(ctx, tx, id, snap.projectID, snap.priorWriter)

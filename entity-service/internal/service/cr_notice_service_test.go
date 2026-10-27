@@ -465,6 +465,33 @@ func TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast(t *testing.T) {
 	})
 }
 
+// Migration 0250's trigger records the proposer of a time that has no record when another writer
+// replaces them as last writer. Its write to change_request touches only the three record columns,
+// so the outbox row it leaves is no turn of the conversation and no move into an approval state:
+// nothing is sent and nobody is read.
+func TestPlanDate_KeepingALegacyProposerSendsNothing(t *testing.T) {
+	repo := &fakeCRRepo{details: baseDetails(), group: []string{"dev@wso2.com"},
+		actors: map[string]repository.CRNoticeActor{crTestProposerID: {Name: "Aaron Alice"}}}
+	pub := &fakePublisher{}
+	change := crChange(
+		map[string]map[string]any{
+			crColProposedBy:        {"from": nil, "to": crTestProposerID},
+			crColProposedFor:       {"from": nil, "to": crTestProposedOn},
+			"customer_proposed_on": {"from": nil, "to": "2026-10-30T08:00:00+00:00"},
+		},
+		map[string]any{
+			crColState: crStateCustomerApproval, crColCustomerDate: crTestProposedOn,
+			crColProposedBy: crTestProposerID, crColProposedFor: crTestProposedOn,
+		},
+	)
+	if err := newCRService(repo, pub).HandleChange(context.Background(), change); err != nil {
+		t.Fatalf("HandleChange: %v", err)
+	}
+	if len(pub.sent) != 0 || len(repo.actorsAsked) != 0 {
+		t.Fatalf("sent %d, asked for actors %v, want nothing sent and nobody read", len(pub.sent), repo.actorsAsked)
+	}
+}
+
 // A record that is not about the date this row carries is no record: the date
 // was moved by a writer that is not a proposal (or the time does not parse).
 // The actor is then the last writer, exactly as for a row with no record.

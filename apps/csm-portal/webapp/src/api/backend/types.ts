@@ -2933,11 +2933,12 @@ export interface BeChangeRequestCustomerProposal {
    * still a registered contact of the project (a later staff edit does not change it; a plain Re-schedule or
    * re-entering Customer Approval starts a new round and voids it; a time stored with no record -- before the
    * record existed, or written later by another writer on a change request that has had no proposal since it
-   * entered Customer Approval -- is judged by the change request's last writer); `false` when it is not knowable --
-   * a date a WSO2 user wrote in the previous system, one left over from an older cycle, one whose contact
-   * has left the project, or a sync rewrite. The page must then say the proposer is not recorded rather
-   * than guess. Absent on a backend that predates it: the page falls back to whether a name or an email
-   * came with it.
+   * entered Customer Approval -- is judged by the change request's last writer when that is a registered
+   * contact, and since entity-service migration 0250 a later write by anyone else records that contact as its
+   * proposer first when they have a user record); `false` when it is not knowable -- a date a WSO2 user wrote
+   * in the previous system, one left over from an older cycle, one whose contact has left the project, or a
+   * sync rewrite. The page must then say the proposer is not recorded rather than guess. Absent on a backend
+   * that predates it: the page falls back to whether a name or an email came with it.
    */
   proposerRecorded?: boolean | null;
   /** Who proposed it and when: only while `pending` and `proposerRecorded` is true (never an empty guess). */

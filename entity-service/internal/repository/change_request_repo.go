@@ -2164,6 +2164,8 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 //
 // The same "registered contact with role X on project Y" join chain
 // CaseRepository.ProjectContactEmailsByRole and customerContactsSQL use.
+// Migration 0250's temporary trigger (trg_work_item_keep_legacy_customer_proposer)
+// holds a copy of this test in SQL: change the two together until it is dropped.
 func callerIsRegisteredPortalContact(ctx context.Context, tx crQuerier, projectID *string, actorEmail string) (bool, error) {
 	if projectID == nil || *projectID == "" || actorEmail == "" {
 		return false, nil

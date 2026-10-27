@@ -139,9 +139,10 @@ const crSyncStamp = "sn-sync"
 // syncWritesConversationAs is syncWritesConversation by the named writer (a WSO2 user in the
 // previous system, mirrored by the sync): the work_item is stamped with them first, as the sync
 // stamps it, so they are the change's last writer. The record of who proposed a time (0249) is
-// not written: on a row that has none this is the LEGACY shape (a time stored before 0249),
-// whose proposer is the last writer; on a row that has one, the record stays about the time it
-// was written for.
+// not written by this helper (migration 0250's trigger may record the previous writer when a
+// legacy time was already waiting, which the conversation write then moves off): on a row that
+// has none this is the LEGACY shape (a time stored before 0249), whose proposer is the last
+// writer; on a row that has one, the record stays about the time it was written for.
 func (f *crFlow) syncWritesConversationAs(id, writer string, on *string, confirmation string) {
 	f.t.Helper()
 	f.execSQL(`UPDATE work_item SET updated_by = $2 WHERE id = $1`, id, writer)

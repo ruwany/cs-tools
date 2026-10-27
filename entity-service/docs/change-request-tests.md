@@ -35,7 +35,7 @@ cd apps/customer-portal/webapp && node_modules/.bin/playwright test --list tests
 cd apps/csm-portal/webapp && node_modules/.bin/vitest list src/features/csm-operations src/features/help
 ```
 
-Run the integration tests twice, as the superuser and as `csm_app`: five tests of the repository package (two migration-idempotence tests and three seed tests) need table ownership or bypass RLS and fail as `csm_app`; that is expected and they pass as the superuser.
+Run the integration tests twice, as the superuser and as `csm_app`: five tests of the repository package (two migration-idempotence tests and three seed tests) need table ownership or bypass RLS and fail as `csm_app`; that is expected and they pass as the superuser. The re-run tests of migrations 0249 and 0250 (`..._ProposerMigrationIsSafeToRunAgain`, `..._KeepLegacyProposerMigrationIsSafeToRunAgain`) are skipped as `csm_app`: they need the owner of the table.
 
 ## 3. Scenario map
 
@@ -46,7 +46,7 @@ The files below are where each scenario is tested first; most scenarios appear i
 | Create, Request Approval, the lifecycle and the transition graph | `change_request_repo_integration_test.go`, `change_request_create_integration_test.go`, `change_request_transitions_integration_test.go`, `change_request_transitions_test.go` (unit), `change_request_seed_integration_test.go` | CSM `change-request-lifecycle` ("approval flow" Normal / Standard, "state machine", "stepper and action bar"), `change-request-creation`, `change-request-detail` |
 | The customer's answer: who may answer, the customer stages, the lock on the two requirement boxes | `change_request_customer_outcome_integration_test.go`, `change_request_customer_can_answer_integration_test.go`, `change_request_customer_lock_integration_test.go`, `change_request_customer_group_integration_test.go`, `change_request_customer_privacy_integration_test.go` | CSM `change-request-lifecycle` ("customer group", "the customer's own answer is the only way on", "customer requirements lock (real stack)"); customer `customer-change-request-answer`, `-approval`, `-access` |
 | Nobody answers for the customer; nobody to ask; stale approvals | `change_request_no_bypass_integration_test.go`, `change_request_nobody_to_ask_integration_test.go`, `change_request_stale_approvals_integration_test.go` | CSM `change-request-lifecycle` ("nobody answers for the customer", "Request Approval is refused when nobody can be asked") |
-| A customer's proposed time: propose, Accept, counter, decline, Re-schedule; who proposed it; timestamps | `change_request_proposal_integration_test.go`, `change_request_proposal_proposer_integration_test.go`, `change_request_customer_proposal_integration_test.go`, `change_request_reschedule_legacy_integration_test.go`, `change_request_timestamp_echo_integration_test.go`, `change_request_dates_integration_test.go`; unit: `change_request_customer_proposal_test.go`, `change_request_proposer_test.go`, `change_request_window_test.go` | CSM `change-request-lifecycle` ("a customer's proposed time" mocked and real stack, "Re-schedule"); customer `customer-change-request-propose`, `-dates` |
+| A customer's proposed time: propose, Accept, counter, decline, Re-schedule; who proposed it; timestamps | `change_request_proposal_integration_test.go`, `change_request_proposal_proposer_integration_test.go`, `change_request_proposal_legacy_keep_integration_test.go`, `change_request_customer_proposal_integration_test.go`, `change_request_reschedule_legacy_integration_test.go`, `change_request_timestamp_echo_integration_test.go`, `change_request_dates_integration_test.go`; unit: `change_request_customer_proposal_test.go`, `change_request_proposer_test.go`, `change_request_window_test.go` | CSM `change-request-lifecycle` ("a customer's proposed time" mocked and real stack, "Re-schedule"); customer `customer-change-request-propose`, `-dates` |
 | Emergency changes: one CAB approval, no customer step, the boxes ignored | `change_request_emergency_integration_test.go`, `change_request_emergency_test.go` (unit), `change_request_customer_group_integration_test.go` | CSM `change-request-creation` ("an Emergency change proceeds without customer approval or review"), `change-request-lifecycle` ("approval flow, Emergency", "an Emergency change never reaches a customer state"); customer `customer-change-request-visibility` |
 | Which change requests a customer sees, and when | `change_request_visibility_integration_test.go`, `change_request_visibility_state_filter_integration_test.go`, `change_request_visibility_test.go` and `change_request_visibility_lint_test.go` (unit) | customer `customer-change-request-visibility`, `customer-change-requests` |
 | Migrated (synced) rows: unlabeled stages, the sync's enum shapes, legacy rows | `change_request_synced_stages_integration_test.go`, `change_request_synced_stages_test.go` (unit), `change_request_deployment_rls_integration_test.go`; the integration suite re-run on the enum-shaped copy | CSM `change-request-lifecycle` ("migrated (legacy) change requests (real stack)"); customer `customer-change-request-legacy` |
@@ -56,12 +56,26 @@ The files below are where each scenario is tested first; most scenarios appear i
 
 ## Appendix A. Go test functions (snapshot)
 
-`entity-service/internal/repository`: 42 files, 418 test functions. Subtests (`t.Run`) are in addition. The one test function whose name carries the previous system's name (the test of the mirror to it) is counted in its file's total but not listed by name; the `grep` in section 2 lists every one.
+`entity-service/internal/repository`: 48 files, 439 test functions. Subtests (`t.Run`) are in addition. The test functions whose names carry the previous system's name (the tests of the mirror to it and of the create that writes it first) are counted in their file's total but not listed by name; the `grep` in section 2 lists every one.
 
 **`change_request_approvals_group_integration_test.go`** (integration, 1)
 - TestChangeRequestFlowIntegration_ApprovalsCarryTheAssignmentGroup
 
-**`change_request_create_integration_test.go`** (integration, 4)
+**`change_request_approved_lock_integration_test.go`** (integration, 3)
+- TestChangeRequestApprovedLockIntegration_ApprovedStatesAreReadOnly
+- TestChangeRequestApprovedLockIntegration_EditableUntilApproved
+- TestChangeRequestPlannedDateSortIntegration_NonFiniteDatesAreNoDate
+
+**`change_request_approved_lock_test.go`** (unit, 7)
+- TestChangeRequestContentApproved_EveryState
+- TestChangeRequestLinksLockedStates_CoverEveryApprovedState
+- TestChangeRequestPatchTouchesApprovedContent
+- TestApprovedLockFields_StaffTimeResponseMovesOnlyTheWindow
+- TestApprovedLockFields_ExplicitNullBindsNothing
+- TestApprovedContentQuery_NumbersEveryBoundValueAfterTheID
+- TestApprovedContentLockedMsg
+
+**`change_request_create_integration_test.go`** (integration, 5)
 - TestChangeRequestCreateIntegration_PortalPersistsAssignmentGroup
 - TestChangeRequestCreateIntegration_PortalWithoutAssignmentGroupLeavesItNull
 - TestChangeRequestCreateIntegration_PortalUnknownAssignmentGroupIsValidationError
@@ -236,6 +250,9 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestErrorCodesIntegration_NothingPending
 - TestChangeRequestErrorCodesIntegration_NotProposableOutOfState
 
+**`change_request_links_group_test.go`** (unit, 1)
+- TestResolveChangeRequestLinks_AssignmentGroup
+
 **`change_request_no_bypass_integration_test.go`** (integration, 7)
 - TestChangeRequestNoBypassIntegration_ManualScheduledOutOfCustomerApprovalIsRefused
 - TestChangeRequestNoBypassIntegration_ManualClosedOutOfCustomerReviewIsRefused
@@ -255,6 +272,11 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestNobodyToAskIntegration_ALegacyDeadEndRowIsNotRejudged
 - TestChangeRequestNobodyToAskIntegration_AMigratedShapedChangeInNewIsUnaffected
 - TestChangeRequestNobodyToAskIntegration_TheRefusalPredictsTheProvisioningOutcome
+
+**`change_request_plan_fields_integration_test.go`** (integration, 4)
+- TestChangeRequestPlanFieldsIntegration_PortalCreateShowsThePlanAtOnce
+- TestChangeRequestPlanFieldsIntegration_OlderRowsShowThePlanFromTheOlderColumns
+- TestChangeRequestPlanFieldsIntegration_EditReplacesAndClearsThePlan
 
 **`change_request_proposal_harness_integration_test.go`** (integration, 0)
 
@@ -292,6 +314,10 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain
 - TestChangeRequestProposalIntegration_TheRecordedUserIsAForeignKeyClearedOnDelete
 - TestChangeRequestProposalIntegration_TheProposalNoticeNamesTheRecordedProposer
+
+**`change_request_proposal_legacy_keep_integration_test.go`** (integration, 2)
+- TestChangeRequestProposalIntegration_AWriteKeepsALegacyProposer
+- TestChangeRequestProposalIntegration_KeepLegacyProposerMigrationIsSafeToRunAgain
 
 **`change_request_proposer_test.go`** (unit, 4)
 - TestNewLastWriter
@@ -484,6 +510,11 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestRuntimeApprovalStageKind_NeverOutOfState
 - TestExcludedMembersSummary
 
+**`change_request_tags_integration_test.go`** (integration, 3)
+- TestChangeRequestTagsIntegration_DetailCarriesTagsAddedThroughTheCasePath
+- TestChangeRequestTagsIntegration_MigratedTagsAreReadAddedAlongsideAndRemoved
+- TestChangeRequestTagsIntegration_CustomersNeverSeeOrReachTags
+
 **`change_request_timestamp_echo_integration_test.go`** (integration, 2)
 - TestChangeRequestTimestampEchoIntegration_TheReadPrintsWhatTheWritePathKept
 - TestChangeRequestTimestampEchoIntegration_EveryAnswerAcceptsWhatTheReadPrinted
@@ -559,7 +590,7 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestIsBlankRichText_LinearTime
 - TestIsBlankRichText_TooDeepIsNotBlank
 
-Service, domain, error-code, route and BFF tests (the tests of the other data source's service files are not listed here):
+Service, domain, error-code, route and BFF tests (the tests of the other data source's service files are not listed here, and a test whose name carries the previous system's name is counted but not listed):
 
 **`entity-service/internal/service/change_request_filters_test.go`** (8)
 - TestParseChangeRequestFieldFilters_CreatedOnRelativeDate
@@ -618,7 +649,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresOnly
 - TestChangeRequestService_CreateChangeRequest_RefusesACustomersDeviationBeforeThePreviousSystem
 
-**`entity-service/internal/service/cr_notice_service_test.go`** (16)
+**`entity-service/internal/service/cr_notice_service_test.go`** (17)
 - TestApprovalNotice_StateTable
 - TestApprovalNotice_OnlyOnTransition
 - TestTeamFromGitReference
@@ -633,6 +664,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast
 - TestPlanDate_AStaleRecordFallsBackToTheLastWriter
 - TestPlanDate_NoRecordFallsBackToTheLastWriter
+- TestPlanDate_KeepingALegacyProposerSendsNothing
 - TestHandleChange_IgnoresUnrelatedEntityType
 - TestHandleChange_SecondBranchRunsAfterFirstFails
 
@@ -640,17 +672,18 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestChangeRequest_CustomerCanAnswerJSONContract
 - TestSearchChangeRequestView_HasNoCustomerCanAnswer
 
-**`entity-service/internal/apierror/errors_test.go`** (4)
+**`entity-service/internal/apierror/errors_test.go`** (5)
 - TestInvalidValue
 - TestWriteJSON_HasNoErrorCodeUnlessGiven
 - TestWriteJSONWithCode_AddsErrorCodeBesideTheMessage
 - TestCodes_AreStableLowerSnakeCase
+- TestPrefixed_KeepsTheRefusalsTypeAndCode
 
 **`entity-service/internal/server/change_request_routes_test.go`** (2)
 - TestChangeRequestLinkOptionsIsInternalOnly
 - TestChangeRequestCreateIsInternalOnly
 
-**`apps/csm-portal/backend/internal/handler/change_requests_test.go`** (19)
+**`apps/csm-portal/backend/internal/handler/change_requests_test.go`** (20)
 - TestCreateChangeRequest
 - TestGetChangeRequest
 - TestPatchChangeRequest
@@ -667,11 +700,12 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestCreateChangeRequest_CustomerGateFlags
 - TestPatchChangeRequest_CustomerGateFlags
 - TestGetChangeRequest_ReturnsCustomerGateFlags
+- TestGetChangeRequest_PassesTagsThrough
 - TestChangeRequestScopeFieldValidation
 - TestChangeRequestLinkOptions
 - TestChangeRequestBodyGuardsIgnoreTheCaseOfKeys
 
-**`apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go`** (15)
+**`apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go`** (16)
 - TestPatchChangeRequest_CustomerAllowedBodies
 - TestPatchChangeRequest_CustomerCannotSendAnyOtherField
 - TestPatchChangeRequest_CustomerMalformedAndAmbiguousBodies
@@ -680,6 +714,7 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestPatchChangeRequest_StaffCannotCarryTheExpectedWindow
 - TestPatchChangeRequest_CustomerUpstreamErrors
 - TestGetChangeRequest_CarriesCustomerCanAnswer
+- TestGetChangeRequest_CarriesTheRequirementBoxesOnlyWithACustomerRead
 - TestGetChangeRequest_CarriesTheCustomerProposal
 - TestMapChangeRequestDetails_NeverPassesOnWhoProposedOrWSO2sOwnFacts
 - TestPatchChangeRequest_CustomerProposalIsValidatedBeforeItIsSent
