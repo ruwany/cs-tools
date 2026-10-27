@@ -815,8 +815,9 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "projectId and deploymentIds are not supported on the ServiceNow data source"}
 	}
 	// ServiceNow has no field for the deviation from the implementation plan
-	// either (the dual-write service strips it before it mirrors).
-	if req.ImplementationDeviation != nil && strings.TrimSpace(*req.ImplementationDeviation) != "" {
+	// either (the dual-write service strips it before it mirrors). Blank is the
+	// PostgreSQL data source's rule (markup with no text is none).
+	if req.ImplementationDeviation != nil && !repository.IsBlankRichText(*req.ImplementationDeviation) {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: implementationDeviationNotOnServiceNowMsg}
 	}
 	if req.Category != nil {

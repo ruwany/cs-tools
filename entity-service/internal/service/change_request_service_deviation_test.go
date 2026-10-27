@@ -24,11 +24,13 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 // The deviation from the implementation plan is PostgreSQL-only: it is a PATCH
 // on its own, it reaches the repository on both create paths (a clone carries
-// it), it never reaches ServiceNow, and the ServiceNow data source refuses it.
+// it), it is never mirrored to the previous system, and the data source that
+// talks to that system directly refuses it.
 
 func TestChangeRequestService_PatchChangeRequest_DeviationAloneIsAPatch(t *testing.T) {
 	deviation := "<p>Restarted the nodes one by one instead of together.</p>"
@@ -104,7 +106,8 @@ func TestChangeRequestService_PatchChangeRequest_DeviationStaysOutOfTheMirror(t 
 }
 
 // A clone is a create carrying the source's deviation: PostgreSQL stores it on
-// both create paths, and the ServiceNow-first create never sends it to ServiceNow.
+// both create paths, and the create that calls the previous system first never
+// sends it there.
 func TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresOnly(t *testing.T) {
 	deviation := "<p>Rolled out to one region first.</p>"
 	want := validCreateChangeRequestRequest()
@@ -133,11 +136,11 @@ func TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresO
 		}
 	})
 
-	t.Run("servicenow-first", func(t *testing.T) {
-		var toServiceNow, toPostgres domain.CreateChangeRequestRequest
+	t.Run("previous-system-first", func(t *testing.T) {
+		var toPreviousSystem, toPostgres domain.CreateChangeRequestRequest
 		mirror := &stubMirrorChangeRequestService{
 			createChangeRequest: func(_ context.Context, r domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
-				toServiceNow = r
+				toPreviousSystem = r
 				return ok(), nil
 			},
 		}
@@ -151,8 +154,8 @@ func TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresO
 		if _, err := svc.CreateChangeRequest(context.Background(), want); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if toServiceNow.ImplementationDeviation != nil {
-			t.Errorf("ServiceNow was sent the deviation %q", *toServiceNow.ImplementationDeviation)
+		if toPreviousSystem.ImplementationDeviation != nil {
+			t.Errorf("the previous system was sent the deviation %q", *toPreviousSystem.ImplementationDeviation)
 		}
 		if toPostgres.ImplementationDeviation == nil || *toPostgres.ImplementationDeviation != deviation {
 			t.Errorf("PostgreSQL saw %v, want the clone's deviation", toPostgres.ImplementationDeviation)
@@ -160,8 +163,65 @@ func TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresO
 	})
 }
 
-// The ServiceNow data source has no field for the deviation, so it refuses it
-// rather than drop it: before anything is sent.
+// A customer's create carrying a deviation is refused (403) before the create
+// that calls the previous system first calls it: a refusal after it would leave
+// a record there with no PostgreSQL row. The route is internal-only; this is
+// the second line.
+func TestChangeRequestService_CreateChangeRequest_RefusesACustomersDeviationBeforeThePreviousSystem(t *testing.T) {
+	deviation := "<p>Rolled out to one region first.</p>"
+	req := validCreateChangeRequestRequest()
+	req.ImplementationDeviation = &deviation
+	mirror := &stubMirrorChangeRequestService{
+		createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+			t.Error("the previous system was called for a customer's create carrying a deviation")
+			return domain.CreateChangeRequestResponse{}, nil
+		},
+	}
+	repo := &stubChangeRequestRepo{
+		createChangeRequestFromServiceNow: func(context.Context, domain.CreateChangeRequestRequest, string, string, string) (domain.CreateChangeRequestResponse, error) {
+			t.Error("PostgreSQL was written for a customer's create carrying a deviation")
+			return domain.CreateChangeRequestResponse{}, nil
+		},
+	}
+	svc := NewChangeRequestServiceWithSNMirror(repo, stubUserRepo{}, mirror)
+	customer := repository.WithCallerIdentity(contextWithUserIDToken(fakeJWTWithEmail(t, "dave.mendis@example.com")),
+		repository.SearchScope{ProjectIDs: []string{"proj-1"}, ViewerEmail: "dave.mendis@example.com"})
+
+	_, err := svc.CreateChangeRequest(customer, req)
+	var fe *apierror.ForbiddenError
+	if !errors.As(err, &fe) || fe.Code != apierror.CodeChangeRequestForbidden {
+		t.Fatalf("err = %v, want the 403 change_request_forbidden", err)
+	}
+
+	// Staff, and a customer whose create carries no (or a blank) deviation, reach
+	// the previous system as before.
+	called := 0
+	mirror.createChangeRequest = func(context.Context, domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+		called++
+		resp := domain.CreateChangeRequestResponse{Message: "ok"}
+		resp.ChangeRequest.ID = testUUID
+		return resp, nil
+	}
+	repo.createChangeRequestFromServiceNow = func(context.Context, domain.CreateChangeRequestRequest, string, string, string) (domain.CreateChangeRequestResponse, error) {
+		return domain.CreateChangeRequestResponse{Message: "ok"}, nil
+	}
+	staff := repository.WithCallerIdentity(contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@wso2.com")),
+		repository.SearchScope{Unrestricted: true, ViewerEmail: "jane.doe@wso2.com"})
+	if _, err := svc.CreateChangeRequest(staff, req); err != nil {
+		t.Errorf("staff create with a deviation: %v", err)
+	}
+	blank := "<p><br></p>"
+	req.ImplementationDeviation = &blank
+	if _, err := svc.CreateChangeRequest(customer, req); err != nil {
+		t.Errorf("customer create with a blank deviation: %v", err)
+	}
+	if called != 2 {
+		t.Errorf("the previous system was called %d times, want 2", called)
+	}
+}
+
+// The data source that talks to the previous system directly has no field for
+// the deviation, so it refuses it rather than drop it: before anything is sent.
 func TestServiceNowChangeRequestService_RefusesTheDeviation(t *testing.T) {
 	svc := NewServiceNowChangeRequestService(nil)
 	deviation := "<p>Something else was done.</p>"
@@ -172,11 +232,11 @@ func TestServiceNowChangeRequestService_RefusesTheDeviation(t *testing.T) {
 	_, err := svc.CreateChangeRequest(ctx, create)
 	var ve *apierror.ValidationError
 	if !errors.As(err, &ve) || ve.Msg != implementationDeviationNotOnServiceNowMsg {
-		t.Errorf("create with a deviation: err = %v, want the ServiceNow refusal", err)
+		t.Errorf("create with a deviation: err = %v, want that data source's refusal", err)
 	}
 
 	_, err = svc.PatchChangeRequest(ctx, testUUID, domain.PatchChangeRequestRequest{ImplementationDeviation: &deviation})
 	if !errors.As(err, &ve) || ve.Msg != implementationDeviationNotOnServiceNowMsg {
-		t.Errorf("PATCH with a deviation: err = %v, want the ServiceNow refusal", err)
+		t.Errorf("PATCH with a deviation: err = %v, want that data source's refusal", err)
 	}
 }

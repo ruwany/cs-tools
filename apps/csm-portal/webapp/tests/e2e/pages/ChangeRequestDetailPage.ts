@@ -424,7 +424,7 @@ export class ChangeRequestDetailPage {
   }
 
   /** The form's action once the change request has been approved, while only a work note is entered: every field is read-only
-   * but the work note and (until the change is closed, canceled or rolled back) the deviation from the implementation plan; once the
+   * but the work note and (in implement, review and customer_review) the deviation from the implementation plan; once the
    * deviation is edited the button reads "Save". */
   addWorkNoteButton(): Locator {
     return this.editDialog().getByRole("button", { name: /^(Add work note|Saving…)$/ });

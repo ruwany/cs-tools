@@ -1437,9 +1437,10 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		if err := checkApprovedContentLock(ctx, tx, id, gates, req, staffTimeResponse); err != nil {
 			return "", err
 		}
-		// The deviation from the implementation plan is not under that lock (it is
-		// written after the approval), but it is final once the change is closed,
-		// canceled or rolled back (change_request_deviation.go).
+		// The deviation from the implementation plan is not under that lock: it is
+		// recorded from Implement on (in New only a clone's carried-over one can be
+		// cleared) and is final once the change is closed, canceled or rolled back
+		// (change_request_deviation.go).
 		if err := checkDeviationEditable(ctx, tx, id, gates, req.ImplementationDeviation); err != nil {
 			return "", err
 		}
@@ -1747,6 +1748,13 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 			// provisionCustomerStage applies), else the change would reach Customer
 			// Approval / Customer Review with nobody to answer.
 			if err := checkRequestApprovalCanAsk(ctx, tx, id, gates.state, approvalRequired, reviewRequired, effectiveProject, req.RequestedByID); err != nil {
+				return "", err
+			}
+			// ... and the plan that goes for approval must already say what a
+			// clone's carried-over deviation said: Request Approval is refused while
+			// the deviation in effect (the request's, else the stored one) is not
+			// blank (change_request_deviation.go).
+			if err := checkRequestApprovalDeviationCleared(ctx, tx, id, gates.state, req.ImplementationDeviation); err != nil {
 				return "", err
 			}
 			effectiveState = &dest
@@ -2498,6 +2506,11 @@ func changeRequestEnumArgs(req domain.CreateChangeRequestRequest) (impact, risk,
 //
 // crvis: internal callers only: POST /change-requests is wrapped by internalOnly (server/routes.go), so no customer identity reaches it
 func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest, createdBy string) (domain.CreateChangeRequestResponse, error) {
+	// A customer may not set the deviation from the implementation plan (a
+	// second line behind the route's internalOnly; change_request_deviation.go).
+	if err := RefuseExternalCreateDeviation(ctx, req.ImplementationDeviation); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	if err := ValidateCreateChangeRequestType(req.Type); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
@@ -2618,6 +2631,11 @@ const createChangeRequestFromServiceNowQuery = `
 //
 // crvis: internal callers only: the ServiceNow-first create runs behind POST /change-requests, wrapped by internalOnly (server/routes.go)
 func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Context, req domain.CreateChangeRequestRequest, id, number, createdBy string) (domain.CreateChangeRequestResponse, error) {
+	// Judged on the caller's own identity, before WithSystemIdentity below
+	// replaces it (change_request_deviation.go).
+	if err := RefuseExternalCreateDeviation(ctx, req.ImplementationDeviation); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	if err := ValidateCreateChangeRequestType(req.Type); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}

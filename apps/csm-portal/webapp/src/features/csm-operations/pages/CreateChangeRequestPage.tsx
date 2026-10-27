@@ -41,6 +41,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import CarriedOverDeviationField from "@features/csm-operations/components/CarriedOverDeviationField";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
 import { isBlankHtml } from "@utils/sanitizeHtml";
 import { isPastZonedInput, zonedInputToBackendUtc } from "@utils/dateTime";
@@ -256,18 +257,23 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const [implementationPlan, setImplementationPlan] = useState(
     draft?.implementationPlan ?? cloneState?.implementationPlan ?? "",
   );
-  // A clone copies the source's deviation from the implementation plan. The
-  // field is shown only when the form opened with one (a clone of a change
-  // request that has a deviation, or a draft of one): a new change request has
-  // no plan to have deviated from yet.
+  // A clone copies the source's deviation from the implementation plan. It is
+  // shown only when the form opened with one (a clone of a change request that
+  // has a deviation, or a draft of one), read-only: a deviation is recorded from
+  // Implement on, so all that can be done with a carried-over one is fold it into
+  // the implementation plan and clear it ("Clear deviation"; the new change request
+  // cannot request approval until it is cleared). Left as it is, it is sent.
   const initialImplementationDeviation = draft?.implementationDeviation ?? cloneState?.implementationDeviation ?? "";
   const [implementationDeviation, setImplementationDeviation] = useState(initialImplementationDeviation);
-  // Decided from either source, not the restored value alone: a draft that kept a
-  // deviation the user had emptied must still show the field (to retype it), and the
-  // clone it came from still has one.
-  const [showImplementationDeviation] = useState(
-    () => !isBlankHtml(draft?.implementationDeviation ?? "") || !isBlankHtml(cloneState?.implementationDeviation ?? ""),
+  // The carried-over text, from either source, not the restored value alone: a
+  // draft that kept a cleared deviation must still show it (to keep it after all),
+  // and the clone it came from still has it.
+  const [carriedOverDeviation] = useState(() =>
+    !isBlankHtml(draft?.implementationDeviation ?? "")
+      ? (draft?.implementationDeviation ?? "")
+      : (cloneState?.implementationDeviation ?? ""),
   );
+  const showImplementationDeviation = !isBlankHtml(carriedOverDeviation);
   const [riskImpactAnalysis, setRiskImpactAnalysis] = useState(
     draft?.riskImpactAnalysis ?? cloneState?.riskImpactAnalysis ?? "",
   );
@@ -994,13 +1000,13 @@ export default function CreateChangeRequestPage(): JSX.Element {
             setImplementationPlan,
           )}
           {showImplementationDeviation && (
-            <ExpandableRichTextField
+            <CarriedOverDeviationField
               id="cr-implementation-deviation"
-              label="Deviation from the implementation plan"
-              value={implementationDeviation}
-              onChange={setImplementationDeviation}
+              html={carriedOverDeviation}
+              cleared={isBlankHtml(implementationDeviation)}
+              onClearedChange={(cleared) => setImplementationDeviation(cleared ? "" : carriedOverDeviation)}
+              clearedText="Cleared: it is not copied to the new change request."
               disabled={isSubmitting}
-              helperText="Internal: never shown to the customer. Carried over from the change request this one was cloned from; clear it if it does not apply to this change."
             />
           )}
           {renderEditorField(

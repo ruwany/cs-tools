@@ -328,42 +328,60 @@ impact analysis (sent as `impactDescription`), beside the fields it already had.
 Once the change request has been approved (`changeRequestApprovedReadOnlyReason`: Customer Approval, Scheduled, Implement,
 Review, Customer Review, Closed, Rollback -- CAB approval received, or a Standard change scheduled; not Canceled) every
 field is disabled under one notice and the form's inputs are the internal **Work note**, sent as `workNote` with the
-button "Add work note", and, until the change is closed, canceled or rolled back, the deviation from the implementation plan (next
+button "Add work note", and, in Implement, Review and Customer Review, the deviation from the implementation plan (next
 section). This mirrors entity-service's approved-content lock (400 `change_request_approved_read_only`),
 which is the authority; the deployments' window (`changeRequestScopeLockedReason`) closes at the same point, and the review
 box can no longer be added after the approval. A work note can ride with any save before the approval too;
 `usePatchChangeRequest` refreshes the comments query when one was sent. The CSM microapp disables its Edit button in the
 same states. e2e: the fake API refuses the same edits in the backend's words (`approvedReadOnlyMessage`, `APPROVED_STATES`).
 
-### The deviation from the implementation plan (editable after approval, final once closed)
+### The deviation from the implementation plan (recorded from Implement on, final once closed)
 
 What the implementation or the review actually did differently from the approved implementation plan
 (`implementationDeviation`, rich text; entity-service CLAUDE.md, "The deviation from the implementation plan", has the
-backend rules). It is the one field the approved lock leaves open:
+backend rules). It is the one field the approved lock leaves open, and only while implementation is under way (the user's
+decision, 2026-10-26: the deviation is only relevant during implementation):
 
-- **Edit form** (`EditChangeRequestDialog`): offered from the approval on (`implementationDeviationOffered`): once approved it
-  sits at the top beside the work note, under the notice `CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON`
-  (`changeRequestApprovedNotice`), and the button reads "Save" once it is edited ("Add work note" otherwise). Final once the
-  change is closed, canceled or rolled back (`implementationDeviationLockedReason`, mirroring the backend's 400
-  `change_request_deviation_final`): shown read-only with that reason when one is stored, not shown when none is. Before the
-  approval it is shown (under the implementation plan, editable) only when one is stored, i.e. a clone carried it. Cleared with
-  `""` like the plan fields (`useRichTextPlanField`).
+- **When** (`implementationDeviationLockedReason(state, stored)`, mirroring the backend's `checkDeviationEditable`, which judges
+  the stored state): editable in Implement, Review and Customer Review (`implementationDeviationRecordable`); before that it
+  cannot be recorded (400 `change_request_deviation_not_yet`, reason `IMPLEMENTATION_DEVIATION_NOT_YET_REASON`), except that in
+  New one a clone carried over can be cleared (`IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON`); final once the change is closed,
+  canceled or rolled back (400 `change_request_deviation_final`).
+- **Edit form** (`EditChangeRequestDialog`, `implementationDeviationOffered`): in Implement, Review and Customer Review it sits at
+  the top beside the work note, under the notice `CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON` (`changeRequestApprovedNotice`;
+  Customer Approval, Scheduled, Closed and Rollback get `CHANGE_REQUEST_APPROVED_READ_ONLY_REASON`, "Only work notes can be
+  added"), and the button reads "Save" once it is edited ("Add work note" otherwise). Cleared with `""` like the plan fields
+  (`useRichTextPlanField`). In every other state it is shown read-only with the reason when one is stored, and not shown when
+  none is. In New a stored one (`implementationDeviationClearable`; "stored" as the backend judges it, `hasImplementationDeviation`:
+  `isBlankHtml`, no text once the markup is removed, so `<p><br></p>`, `&nbsp;` and an image alone are none -- entity-service's
+  `IsBlankRichText` mirrors `isBlankHtml`, stores such a value as NULL and reads a stored one the same way) is shown read-only under the implementation
+  plan by `CarriedOverDeviationField`, with "Clear deviation": the choice is sent as `implementationDeviation: ""` with the
+  save, so the engineer folds it into the plan and clears it in one save or in two ("Keep deviation" undoes it; the text stays on
+  screen to copy from).
+- **Request Approval** (`ChangeRequestActionBar`, `TARGET_BLOCKED_REASON.assess`): disabled with the focusable, labelled reason
+  `REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON` while a change in New has a deviation stored
+  (`requestApprovalNeedsDeviationClearedReason`, every type), after the team, project and contact reasons; the backend refuses it
+  with 400 `change_request_deviation_not_incorporated`.
 - **Plan tab** (`CsmChangeRequestDetailPage`): `ImplementationDeviationSection`, right under the Implementation plan section, a
   named region with a warning-coloured edge and icon (prominent without being an alert). The Plan tab is not the default one, so
   its label carries a small warning dot and the tab's accessible name becomes "Plan, has a deviation from the implementation plan"
   (an explicit `aria-label`: Chrome's computed name of the flex label put a space before the comma). The Plan card renders for
-  a deviation alone.
-- **Clone** copies it (`buildCloneChangeRequestNavState`, `CLONE_SOURCE_GAP_MESSAGE`); the create form shows the field only when it
-  opened with one (a clone or a draft of one), under the implementation plan, and sends it only then and only non-blank. The draft
-  keeps it (`ChangeRequestDraft.implementationDeviation`, optional).
+  a deviation alone. It shows what is stored, in every state.
+- **Clone** copies it (`buildCloneChangeRequestNavState`, `CLONE_SOURCE_GAP_MESSAGE`); the create form shows it only when it
+  opened with one (a clone or a draft of one), under the implementation plan, read-only with the same explanation and "Clear
+  deviation" (`CarriedOverDeviationField`); left as it is, it is sent (non-blank only), and the new change then has to clear it
+  before Request Approval. The draft keeps it (`ChangeRequestDraft.implementationDeviation`, optional; a cleared one is kept as
+  blank, and the clone's text is still offered with "Keep deviation").
 - **PDF export** writes it after the implementation plan. Not in the bulk edit. Not in the CSM microapp (its detail shows no plan
   at all).
 - Internal: the backend never returns it to a customer, and the customer portal has no field for it.
 - Tests: `EditChangeRequestDialog.test.tsx` ("deviation from the implementation plan"), `CsmChangeRequestDetailPage.test.tsx`
-  (same), `CreateChangeRequestPage.test.tsx` (Clone prefill), `changeRequests.test.ts` (one row per state),
-  `ImplementationDeviationSection.test.tsx`; e2e `change-request-lifecycle.spec.ts` ("the deviation from the implementation plan
-  (mocked backend)"), whose fake API holds the plan and the deviation (`seedPlan`, `plan()`) and refuses a change in a final
-  state in the backend's words (`deviationFinalMessage`).
+  (same), `CreateChangeRequestPage.test.tsx` (Clone prefill), `ChangeRequestActionBar.test.tsx` ("Request Approval needs the
+  deviation a clone carried over cleared"), `changeRequests.test.ts` (one row per state, row ids as the backend's
+  `TestDeviationEditRefusal_PerState`), `ImplementationDeviationSection.test.tsx`; e2e `change-request-lifecycle.spec.ts` ("the
+  deviation from the implementation plan (mocked backend)"), whose fake API holds the plan and the deviation (`seedPlan`,
+  `plan()`) and refuses in the backend's words (`deviationNotYetMessage`, `DEVIATION_CARRIED_OVER_MESSAGE`,
+  `deviationFinalMessage`, `DEVIATION_NOT_INCORPORATED_MESSAGE`, `DEVIATION_RECORDABLE_STATES`).
 
 ### Customers never decide in the CSM portal
 

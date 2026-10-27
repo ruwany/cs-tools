@@ -173,15 +173,19 @@ func TestApprovedContentQuery_NumbersEveryBoundValueAfterTheID(t *testing.T) {
 }
 
 func TestApprovedContentLockedMsg(t *testing.T) {
-	// While the change is open the deviation from the implementation plan can still be recorded.
-	got := approvedContentLockedMsg([]string{"description", "implementationPlan"}, crStateScheduled)
-	want := "description, implementationPlan can no longer be changed: the change request has been approved (current state: scheduled), so its fields are read-only; only work notes and the deviation from the implementation plan can be added"
-	if got != want {
-		t.Errorf("message = %q\nwant      %q", got, want)
+	// Once implementation has started, and until the change is final, the deviation
+	// from the implementation plan can still be recorded.
+	for _, state := range []string{crStateImplement, crStateReview, crStateCustomerReview} {
+		got := approvedContentLockedMsg([]string{"description", "implementationPlan"}, state)
+		want := "description, implementationPlan can no longer be changed: the change request has been approved (current state: " + lockStateName(state) + "), so its fields are read-only; only work notes and the deviation from the implementation plan can be added"
+		if got != want {
+			t.Errorf("%s: message = %q\nwant      %q", state, got, want)
+		}
 	}
-	// Closed and rolled back are approved and final, so no deviation either. (Canceled
-	// is final too, but is not an approved state, so it never reaches this message.)
-	for _, state := range []string{crStateClosed, crStateRollback} {
+	// Before implementation (customer_approval, scheduled) the deviation cannot be
+	// recorded yet; closed and rolled back are final. (Canceled is final too, but is
+	// not an approved state, so it never reaches this message.)
+	for _, state := range []string{crStateCustomerApproval, crStateScheduled, crStateClosed, crStateRollback} {
 		got := approvedContentLockedMsg([]string{"description"}, state)
 		want := "description can no longer be changed: the change request has been approved (current state: " + lockStateName(state) + "), so its fields are read-only; only work notes can be added"
 		if got != want {

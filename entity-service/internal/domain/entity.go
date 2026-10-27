@@ -4539,8 +4539,12 @@ type CreateChangeRequestRequest struct {
 
 	// ImplementationDeviation: see ChangeRequest.ImplementationDeviation. A
 	// create carries it only for a clone of a change request that has one; a
-	// blank value is not stored. PostgreSQL only: the ServiceNow data source
-	// refuses it, and the ServiceNow-first create does not send it to ServiceNow.
+	// blank value (no text once its markup is removed, such as an emptied
+	// editor's "<p><br></p>") is not stored. The new change request then has to
+	// fold it into its implementation plan and clear it before Request Approval.
+	// Staff only: a create from a customer carrying one is refused (403). A
+	// backing data source that cannot store it refuses a non-blank one (400),
+	// and it is never mirrored to the previous system.
 	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
 
 	// Comment is the customer-visible "Additional comments" entry and WorkNote
@@ -5105,14 +5109,21 @@ type PatchChangeRequestRequest struct {
 
 	// ImplementationDeviation sets the "Deviation from the implementation plan"
 	// (see ChangeRequest.ImplementationDeviation). nil leaves it unchanged; a
-	// blank value clears it (a plain *string, not the pointer-to-pointer below:
+	// blank value -- no text once its markup is removed, so "<p><br></p>" too --
+	// clears it (a plain *string, not the pointer-to-pointer below:
 	// encoding/json decodes an explicit null as omitted). It is not one of the
-	// approved lock's fields, so it is accepted in every state but a final one
-	// (closed, canceled, rollback), where a change is a 400
-	// change_request_deviation_final and resending the stored value is accepted.
-	// The state judged is the stored one, so a PATCH that closes the change may
-	// still record the deviation. Staff only (a customer's PATCH may not carry
-	// it); PostgreSQL only, never mirrored to ServiceNow.
+	// approved lock's fields: it is recorded in implement, review and
+	// customer_review. Before implementation a change is a 400
+	// change_request_deviation_not_yet (in new, clearing one a clone carried over
+	// is accepted), and in a final state (closed, canceled, rollback) a 400
+	// change_request_deviation_final; resending the stored value is always
+	// accepted. The state judged is the stored one, so a PATCH that closes the
+	// change from review may still record the deviation, and one that moves it
+	// from scheduled to implement may not. Request Approval is refused (400
+	// change_request_deviation_not_incorporated) while one is stored, unless the
+	// same PATCH clears it. Staff only (a customer's PATCH may not carry it).
+	// A backing data source that cannot store it refuses it (400), and it is
+	// never mirrored to the previous system.
 	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
 
 	// The fields below are the change-request field-parity additions. Except
@@ -5474,10 +5485,12 @@ type ChangeRequest struct {
 
 	// ImplementationDeviation is the "Deviation from the implementation plan":
 	// what the implementation or the review actually did differently from
-	// ImplementationPlan (rich text). Unlike the plan, it stays editable once the
-	// change request has been approved, until it is closed, canceled or rolled
-	// back. Internal: null for a restricted (customer) caller, the same line Tags
-	// draws. PostgreSQL data source only (null on the ServiceNow one).
+	// ImplementationPlan (rich text). Unlike the plan, it is recorded after the
+	// approval: from implement on, until the change request is closed, canceled
+	// or rolled back. A clone copies it, and the clone must fold it into its plan
+	// and clear it before Request Approval. Internal: null for a restricted
+	// (customer) caller, the same line Tags draws. Null when the backing data
+	// source has no such field.
 	ImplementationDeviation *string `json:"implementationDeviation"`
 
 	// Group C1 -- real content the shared API did not surface before.

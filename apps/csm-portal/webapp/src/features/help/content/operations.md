@@ -270,12 +270,14 @@ From the detail page a CS engineer can:
   affected-components plans, or **Clone** the change request into a new one
   pre-filled with this one's values (useful for promoting the same change
   through another environment; a deviation from the implementation plan is
-  copied too). Once the change request has been approved (by the CAB, or
+  copied too, read-only: fold it into the new change request's implementation
+  plan and select **Clear deviation**, because Request Approval stays
+  unavailable while it is there). Once the change request has been approved (by the CAB, or
   by Request Approval for a Standard change) every field is read-only,
-  except the work note and the **Deviation from the
-  implementation plan**, which you can record (and correct) until the
-  change request is closed, canceled or rolled back; after that it is
-  final. The deviation is internal: customers never see it. The Customer Project, deployments and
+  except the work note and, once implementation has started, the **Deviation from the
+  implementation plan**, which you can record (and correct) while the
+  change request is in Implement, Review or Customer Review; once it is closed,
+  canceled or rolled back it is final. The deviation is internal: customers never see it. The Customer Project, deployments and
   deployment products can only be changed until implementation starts; the
   deployment products follow from the chosen deployments and are not picked.
   What the customer has confirmed isn't editable here — it is recorded by the

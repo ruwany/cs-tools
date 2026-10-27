@@ -16,11 +16,11 @@
 
 -- "Deviation from the implementation plan": what the implementation (or the
 -- review) actually did differently from the change request's implementation
--- plan, as rich text. Unlike the plan itself it stays editable once CAB
--- approval has been received, until the change request is closed, canceled or
--- rolled back (PatchChangeRequest; it is not one of approvedLockFields). It is
--- internal: only WSO2 staff read or write it. ServiceNow has no such field, so
--- it lives here only and is never mirrored.
+-- plan, as rich text. Unlike the plan itself it is written after the approval:
+-- it is recorded from Implement on, until the change request is closed, canceled
+-- or rolled back (PatchChangeRequest; it is not one of approvedLockFields). It is
+-- internal: only WSO2 staff read or write it. The previous system has no such
+-- field, so it lives here only and is never mirrored.
 --
 -- Additive and idempotent: safe to re-run against a database that already has it.
 ALTER TABLE change_request ADD COLUMN IF NOT EXISTS implementation_deviation TEXT;

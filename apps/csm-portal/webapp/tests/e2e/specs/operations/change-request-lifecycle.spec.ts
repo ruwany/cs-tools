@@ -117,6 +117,8 @@ import {
   projectFrozenMessage,
   approvedReadOnlyMessage,
   deviationFinalMessage,
+  deviationNotYetMessage,
+  DEVIATION_NOT_INCORPORATED_MESSAGE,
   APPROVED_STATES,
   requirementCannotBeRemovedMessage,
   requirementGatePassedMessage,
@@ -1590,7 +1592,33 @@ test.describe("change request lifecycle — the deviation from the implementatio
     expect((await patchFromPage(page, { implementationDeviation: DEVIATION })).status).toBe(200);
   });
 
-  test("Clone carries the deviation into the create form, which sends it", async ({ page }) => {
+  test("before implementation it cannot be recorded: Scheduled offers no field, and the move to Implement cannot carry it", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("scheduled");
+    await page.reload();
+
+    await detail.openEditDialog();
+    await expect(detail.editDialog().getByText("Only work notes can be added.", { exact: false })).toBeVisible();
+    await expect(detail.editDeviationGroup()).toHaveCount(0);
+    await expect(detail.addWorkNoteButton()).toBeVisible();
+
+    // Judged on the stored state (Scheduled): refused, and nothing moves.
+    expect(await patchFromPage(page, { state: "implement", implementationDeviation: DEVIATION })).toEqual({
+      status: 400,
+      message: deviationNotYetMessage("scheduled"),
+    });
+    expect(api.state()).toBe("scheduled");
+    expect(api.plan().implementationDeviation).toBeNull();
+    // Once in Implement it is recorded.
+    expect((await patchFromPage(page, { state: "implement" })).status).toBe(200);
+    expect((await patchFromPage(page, { implementationDeviation: DEVIATION })).status).toBe(200);
+    expect(api.plan().implementationDeviation).toBe(DEVIATION);
+  });
+
+  test("Clone carries the deviation into the create form, read-only, and sends it; the new change clears it before Request Approval", async ({ page }) => {
     const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
     api.seedPlan({ implementationPlan: PLAN, implementationDeviation: DEVIATION });
     const detail = new ChangeRequestDetailPage(page);
@@ -1602,7 +1630,12 @@ test.describe("change request lifecycle — the deviation from the implementatio
     await expect(page.getByRole("heading", { name: "New change request" })).toBeVisible();
     const deviation = page.getByRole("group", { name: /^Deviation from the implementation plan/ });
     await expect(deviation).toContainText("Upgraded the nodes one at a time instead.");
-    await expect(page.getByText(/Carried over from the change request this one was cloned from/)).toBeVisible();
+    await expect(deviation.locator(".editor-input")).not.toBeEditable();
+    await expect(
+      page.getByText(/Carried over from the cloned change request\. Fold it into the implementation plan, then clear it before requesting approval\./),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Clear deviation" })).toBeVisible();
+    // Left as it is, it is sent.
     const [request] = await Promise.all([
       page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/change-requests")),
       page.getByRole("button", { name: /create change request/i }).click(),
@@ -1611,6 +1644,28 @@ test.describe("change request lifecycle — the deviation from the implementatio
       implementationPlan: expect.stringContaining("Upgrade every node together."),
       implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
     });
+    await expect(page).toHaveURL(new RegExp(`/operations/change-requests/${FAKE_CR_ID}$`));
+
+    // The new change, in New, cannot request approval until the deviation is folded into the plan and cleared.
+    const blocked = page.getByLabel(
+      "Request Approval: Fold the carried-over deviation into the implementation plan and clear it before requesting approval",
+    );
+    await expect(blocked).toBeVisible();
+    expect(await patchFromPage(page, { state: "assess" })).toEqual({ status: 400, message: DEVIATION_NOT_INCORPORATED_MESSAGE });
+    expect(api.state()).toBe("new");
+
+    // The Edit form shows it read-only under the plan, and clears it with the save.
+    await detail.openEditDialog();
+    await expect(detail.editDeviationEditor()).not.toBeEditable();
+    await detail.editDialog().getByRole("button", { name: "Clear deviation" }).click();
+    const [clearing] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "PATCH" && r.url().endsWith(`/change-requests/${FAKE_CR_ID}`)),
+      detail.saveEdit(),
+    ]);
+    expect(clearing.postDataJSON()).toEqual({ implementationDeviation: "" });
+    await expect(detail.editDialog()).toHaveCount(0);
+    expect(api.plan().implementationDeviation).toBeNull();
+    await expect(blocked).toHaveCount(0);
   });
 });
 

@@ -2816,9 +2816,11 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   implementationPlan?: string | null;
   /** Rich-text "Deviation from the implementation plan": what the implementation or
    * the review actually did differently from `implementationPlan`. Unlike the plan it
-   * stays editable once approved, until the change request is closed, canceled or
-   * rolled back. Internal (the backend never returns it to a customer); absent or
-   * null on the ServiceNow data source. */
+   * is written after the approval: in implement, review and customer_review, final
+   * once the change request is closed, canceled or rolled back. A clone copies it,
+   * and the clone must fold it into its plan and clear it before Request Approval.
+   * Internal (the backend never returns it to a customer); absent or null when the
+   * backing data source has no such field. */
   implementationDeviation?: string | null;
   priority?: { id: number; label: string } | null;
   /** The `category` enum value (`other`, `devops`, ...) as the Postgres data
@@ -3103,7 +3105,8 @@ export interface BeCreateChangeRequestPayload {
   justification?: string;
   implementationPlan?: string;
   /** The deviation from the implementation plan, sent only by a clone of a change
-   * request that has one. */
+   * request that has one. The new change request then has to fold it into its
+   * implementation plan and clear it before Request Approval. */
   implementationDeviation?: string;
   riskImpactAnalysis?: string;
   backoutPlan?: string;
@@ -3416,7 +3419,7 @@ export interface BePatchChangeRequestPayload {
    * An internal work note, appended to the journal (never blank). It can still
    * be added once the change request has been approved, when every other field
    * is read-only (400 `change_request_approved_read_only`) except
-   * `implementationDeviation`.
+   * `implementationDeviation` (from implement on).
    */
   workNote?: string;
   plannedStartOn?: string;
@@ -3467,9 +3470,13 @@ export interface BePatchChangeRequestPayload {
   //     shipped half-right.
   /** Rich-text implementation plan; `""` clears it. */
   implementationPlan?: string;
-  /** Rich-text deviation from the implementation plan; `""` clears it. Accepted
-   * after approval too, until the change request is closed, canceled or rolled back
-   * (then a change is a 400 `change_request_deviation_final`). */
+  /** Rich-text deviation from the implementation plan; `""` clears it. Recorded in
+   * implement, review and customer_review (judged on the stored state). Before that a
+   * change is a 400 `change_request_deviation_not_yet`, except clearing one a clone
+   * carried over while the change request is new; once it is closed, canceled or
+   * rolled back a 400 `change_request_deviation_final`. Request Approval is a 400
+   * `change_request_deviation_not_incorporated` while one is stored, unless the same
+   * request clears it. */
   implementationDeviation?: string;
   affectedServicesText?: string;
   affectedComponentsText?: string;

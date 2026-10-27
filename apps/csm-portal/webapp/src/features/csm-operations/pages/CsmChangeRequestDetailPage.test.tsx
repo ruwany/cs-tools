@@ -773,6 +773,27 @@ describe("CsmChangeRequestDetailPage — deviation from the implementation plan"
     expect(screen.queryByRole("region", { name: "Deviation from the implementation plan" })).not.toBeInTheDocument();
   });
 
+  // A clone carries the deviation into New; it has to be folded into the plan and cleared before
+  // Request Approval (the backend refuses it otherwise). The Plan tab shows what is stored, as ever.
+  it("blocks Request Approval on a New change carrying a clone's deviation, and still shows it on the Plan tab", () => {
+    mockQueryResult({
+      data: { ...BASE_CR, legalNextStates: ["assess", "canceled"], implementationDeviation: "<p>Rolled out to one region first.</p>" },
+    });
+    renderPage();
+    const button = screen.getByRole("button", { name: /request approval/i });
+    expect(button).toBeDisabled();
+    expect(button.closest('[tabindex="0"]')).toHaveAttribute(
+      "aria-label",
+      "Request Approval: Fold the carried-over deviation into the implementation plan and clear it before requesting approval",
+    );
+    fireEvent.click(button);
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Plan, has a deviation from the implementation plan" }));
+    expect(screen.getByRole("region", { name: "Deviation from the implementation plan" })).toHaveTextContent(
+      "Rolled out to one region first.",
+    );
+  });
+
   it("is carried by Clone", () => {
     mockQueryResult({ data: WITH_DEVIATION });
     renderPage();

@@ -27,6 +27,16 @@
 //     Standard change scheduled) every field is read-only: a PATCH that changes one is a
 //     400 in the backend's words (`approvedReadOnlyMessage`), work notes and the lifecycle
 //     still go through.
+//   - The deviation from the implementation plan is recorded in implement, review and
+//     customer_review (DEVIATION_RECORDABLE_STATES), judged on the stored state: before that a
+//     change is a 400 (`deviationNotYetMessage`; in New only clearing one a clone carried over
+//     is accepted, else `DEVIATION_CARRIED_OVER_MESSAGE`), once final a 400
+//     (`deviationFinalMessage`), and Request Approval is a 400
+//     (`DEVIATION_NOT_INCORPORATED_MESSAGE`) while one is stored, unless the same PATCH clears it.
+//     In the backend's order: the edit rule right after the approved lock, ahead of rule 4b
+//     (`nobodyToAskMessage` for a box turned on) and of the state's own refusals, Request
+//     Approval's project / contact rules included; the Request Approval rule after those. (The
+//     on-hold gate is checked first here; the backend checks it after all of these.)
 //   - `legalNextStates` offers no manual way to `scheduled` at all, nor to `closed`
 //     out of `customer_review`: staff never record a customer's approval or review.
 //     They are given by the customer, in the Customer Portal (a manual PATCH of
@@ -425,16 +435,31 @@ export const stateJumpMessage = (target: string, from: string, reviewRequired: b
     WAITING_ON[from] ?? "that is not a step of the change request's lifecycle from here"
   }; the moves open to staff from ${from} are: ${opens}`;
 };
+/** The states in which the deviation from the implementation plan is recorded (entity-service `deviationRecordableState`). */
+export const DEVIATION_RECORDABLE_STATES = ["implement", "review", "customer_review"];
 /** The refusal of a PATCH that changes the deviation from the implementation plan of a change request in a final state
  * (entity-service `deviationFinalMsg`, errorCode `change_request_deviation_final`). */
 export const deviationFinalMessage = (state: string): string =>
   `implementationDeviation can no longer be changed: the change request is ${state === "rollback" ? "rolled back" : state}, so its record is final`;
-/** The refusal of a PATCH that changes a field of an approved change request (entity-service `approvedContentLockedMsg`). */
+/** The refusal of a PATCH that changes the deviation before implementation has started (entity-service `deviationNotYetMsg`,
+ * errorCode `change_request_deviation_not_yet`). */
+export const deviationNotYetMessage = (state: string): string =>
+  `implementationDeviation cannot be changed yet: the deviation from the implementation plan can be recorded once implementation has started (current state: ${state})`;
+/** The refusal of a PATCH that sets or changes, rather than clears, the deviation a change request in New carried over from
+ * the change request it was cloned from (entity-service `deviationCarriedOverMsg`, errorCode `change_request_deviation_not_yet`). */
+export const DEVIATION_CARRIED_OVER_MESSAGE =
+  "implementationDeviation can only be cleared before implementation: fold the deviation from the implementation plan carried over from the cloned change request into the implementation plan, then clear it";
+/** The refusal of Request Approval while a deviation is stored (entity-service `deviationNotIncorporatedMsg`, errorCode
+ * `change_request_deviation_not_incorporated`). */
+export const DEVIATION_NOT_INCORPORATED_MESSAGE =
+  "approval cannot be requested until the deviation from the implementation plan carried over from the cloned change request has been folded into the implementation plan and cleared";
+/** The refusal of a PATCH that changes a field of an approved change request (entity-service `approvedContentLockedMsg`): the
+ * deviation is named as still possible only where it can be recorded. */
 export const approvedReadOnlyMessage = (fields: string[], state: string): string =>
   `${fields.join(", ")} can no longer be changed: the change request has been approved (current state: ${state}), so its fields are read-only; ${
-    ["closed", "rollback"].includes(state)
-      ? "only work notes can be added"
-      : "only work notes and the deviation from the implementation plan can be added"
+    DEVIATION_RECORDABLE_STATES.includes(state)
+      ? "only work notes and the deviation from the implementation plan can be added"
+      : "only work notes can be added"
   }`;
 export const projectFrozenMessage = (state: string): string =>
   `projectId can no longer be changed: the Customer Project is fixed once approval has been requested (current state: ${state}). Cancel this change request and clone it to use another project.`;
@@ -840,8 +865,21 @@ export async function installFakeChangeRequestApi(
   // The implementation plan and the deviation from it (rich text; null when none).
   let implementationPlan: string | null = null;
   let implementationDeviation: string | null = null;
-  // Blank is whitespace only, as entity-service's normalizeImplementationDeviation reads it (an empty paragraph is stored).
   const blankToNull = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+  // The deviation's blank is entity-service's IsBlankRichText, which mirrors the webapp's isBlankHtml: no text once
+  // the markup is removed ("<p><br></p>", "&nbsp;", an image alone), stored as NULL, and a stored blank one is none.
+  // There is no DOM here, so this reads the markup the editor writes, not every HTML corner the real rule covers.
+  const deviationBlankToNull = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const text = v
+      .replace(/<(script|style|template|title|svg|math|video|audio|iframe|noscript)\b[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<\/?[a-z][^>]*>/gi, "")
+      .replace(/&nbsp;?|&#160;|&#xa0;/gi, " ");
+    return text.trim() ? v : null;
+  };
+  /** The stored deviation as entity-service reads it: a blank one is none. */
+  const storedDeviation = (): string | null => deviationBlankToNull(implementationDeviation);
   /** "2030-03-01 09:00:00" (UTC, as the planned window is held and sent) or an RFC 3339 instant, as epoch ms. */
   const instantOf = (value: string | null | undefined): number | null => {
     if (!value) return null;
@@ -1113,9 +1151,12 @@ export async function installFakeChangeRequestApi(
 
   /**
    * The backend's creation-phase gate on a PATCH body (the customer's part of a
-   * change request is fully editable only in New): the first refusal wins, in the
-   * backend's order, and nothing is written when one applies. Resending a value
-   * that is already stored is never a refusal.
+   * change request is fully editable only in New), its pure rules 1-4
+   * (`validateCreationPhaseEdits`): the first refusal wins, in the backend's
+   * order, and nothing is written when one applies. Resending a value that is
+   * already stored is never a refusal. The rules that ask who could be asked (4b,
+   * and Request Approval's 6 and 7) run later, as in the backend: `tickedBoxProblem`
+   * and `requestApprovalProblem`.
    */
   const creationPhaseProblem = (body: Record<string, unknown>): string | null => {
     const inNew = state === "new";
@@ -1146,22 +1187,34 @@ export async function installFakeChangeRequestApi(
         if (!scope.projectId) return requirementNeedsProjectMessage(box.field);
       }
     }
-    // 4b. ... and a box turned on needs somebody on that project who can be asked (the refusal names the box(es) turned on).
-    if (!inNew) {
-      const approvalOn = !flags.customerApprovalRequired && body.customerApprovalRequired === true;
-      const reviewOn = !flags.customerReviewRequired && body.customerReviewRequired === true;
-      if ((approvalOn || reviewOn) && askableContacts(scope.projectId).length === 0) return nobodyToAskMessage(approvalOn, reviewOn);
-    }
-    // 6. Request Approval needs somebody to ask when the customer's part is required: a Customer Project, with at least one
-    // registered contact other than the requester (the same people the customer stage would ask).
-    if (body.state === "assess" && inNew) {
-      const gates = effectiveGates();
-      const approval = typeof body.customerApprovalRequired === "boolean" ? body.customerApprovalRequired : gates.customerApprovalRequired;
-      const review = typeof body.customerReviewRequired === "boolean" ? body.customerReviewRequired : gates.customerReviewRequired;
-      const project = typeof body.projectId === "string" && body.projectId ? body.projectId : scope.projectId;
-      if ((approval || review) && !project) return REQUEST_APPROVAL_NEEDS_PROJECT;
-      if ((approval || review) && askableContacts(project).length === 0) return nobodyToAskMessage(approval, review);
-    }
+    return null;
+  };
+
+  /**
+   * Rule 4b (`checkTickedBoxCanBeAsked`): after New a box turned on needs somebody on the project who can be asked (the
+   * refusal names the box(es) turned on). Run after the approved lock and the deviation's edit rule, as in the backend.
+   */
+  const tickedBoxProblem = (body: Record<string, unknown>): string | null => {
+    if (state === "new") return null;
+    const approvalOn = !flags.customerApprovalRequired && body.customerApprovalRequired === true;
+    const reviewOn = !flags.customerReviewRequired && body.customerReviewRequired === true;
+    if ((approvalOn || reviewOn) && askableContacts(scope.projectId).length === 0) return nobodyToAskMessage(approvalOn, reviewOn);
+    return null;
+  };
+
+  /**
+   * Request Approval's rules 6 and 7 (the backend's `case "assess"`, after the transition graph): when the customer's part
+   * is required it needs a Customer Project, with at least one registered contact other than the requester (the same people
+   * the customer stage would ask). Only out of New; a resend later is not judged.
+   */
+  const requestApprovalProblem = (body: Record<string, unknown>): string | null => {
+    if (body.state !== "assess" || state !== "new") return null;
+    const gates = effectiveGates();
+    const approval = typeof body.customerApprovalRequired === "boolean" ? body.customerApprovalRequired : gates.customerApprovalRequired;
+    const review = typeof body.customerReviewRequired === "boolean" ? body.customerReviewRequired : gates.customerReviewRequired;
+    const project = typeof body.projectId === "string" && body.projectId ? body.projectId : scope.projectId;
+    if ((approval || review) && !project) return REQUEST_APPROVAL_NEEDS_PROJECT;
+    if ((approval || review) && askableContacts(project).length === 0) return nobodyToAskMessage(approval, review);
     return null;
   };
 
@@ -1283,6 +1336,43 @@ export async function installFakeChangeRequestApi(
     message: refused.message,
     ...(refused.code ? { errorCode: refused.code } : {}),
   });
+  /**
+   * The backend's edit rule for the deviation from the implementation plan (entity-service `checkDeviationEditable`, run
+   * right after the approved lock and before rule 4b and the state's own refusals), judged on the stored state. Only a
+   * string is judged: entity-service decodes an explicit null as omitted. A resend of the stored value, and a blank one
+   * when none is stored, are never a change.
+   */
+  const deviationEditRefusal = (body: Record<string, unknown>): Refusal | null => {
+    if (typeof body.implementationDeviation === "string" && !DEVIATION_RECORDABLE_STATES.includes(state)) {
+      const requested = deviationBlankToNull(body.implementationDeviation);
+      if (requested !== storedDeviation()) {
+        if (FINAL_STATES.includes(state)) {
+          return { status: 400, message: deviationFinalMessage(state), code: "change_request_deviation_final" };
+        }
+        // In New the one change accepted is clearing the deviation a clone carried over.
+        if (state !== "new" || requested !== null) {
+          const message = state === "new" && storedDeviation() !== null ? DEVIATION_CARRIED_OVER_MESSAGE : deviationNotYetMessage(state);
+          return { status: 400, message, code: "change_request_deviation_not_yet" };
+        }
+      }
+    }
+    return null;
+  };
+  /**
+   * Request Approval's rule 8 (entity-service `checkRequestApprovalDeviationCleared`, after rules 6 and 7): out of New only
+   * (a resend later is not judged), the deviation has to be folded into the plan and cleared: the request's own value when
+   * it carries the field, else the stored one.
+   */
+  const requestApprovalDeviationRefusal = (body: Record<string, unknown>): Refusal | null => {
+    if (body.state === "assess" && state === "new") {
+      const effective =
+        typeof body.implementationDeviation === "string" ? deviationBlankToNull(body.implementationDeviation) : storedDeviation();
+      if (effective !== null) {
+        return { status: 400, message: DEVIATION_NOT_INCORPORATED_MESSAGE, code: "change_request_deviation_not_incorporated" };
+      }
+    }
+    return null;
+  };
   /** The planned window as the backend words it in a stale-window refusal (RFC 3339 bounds). */
   const plannedNow = (): string => {
     const s = instantOf(plannedStartOn);
@@ -1603,7 +1693,7 @@ export async function installFakeChangeRequestApi(
       if (body.customerApprovalRequired !== undefined) flags.customerApprovalRequired = body.customerApprovalRequired as boolean;
       if (body.customerReviewRequired !== undefined) flags.customerReviewRequired = body.customerReviewRequired as boolean;
       implementationPlan = blankToNull(body.implementationPlan);
-      implementationDeviation = blankToNull(body.implementationDeviation);
+      implementationDeviation = deviationBlankToNull(body.implementationDeviation);
       for (const kind of ["comment", "workNote"] as const) {
         const text = body[kind];
         if (typeof text === "string" && text.trim()) journal.push({ kind, text });
@@ -1743,16 +1833,22 @@ export async function installFakeChangeRequestApi(
         // Once approved, every field is read-only: the rest of the request is not written either.
         const approvedProblem = approvedLockProblem(body);
         if (approvedProblem) return json(route, { message: approvedProblem, errorCode: "change_request_approved_read_only" }, 400);
-        // The deviation from the implementation plan is not under that lock, but it is final once the change is over (a
-        // resend of the stored value is accepted).
-        // Only a string is judged: entity-service decodes an explicit null as omitted.
-        if (typeof body.implementationDeviation === "string" && FINAL_STATES.includes(state) && blankToNull(body.implementationDeviation) !== implementationDeviation) {
-          return json(route, { message: deviationFinalMessage(state), errorCode: "change_request_deviation_final" }, 400);
-        }
+        // The deviation from the implementation plan is not under that lock: it is recorded from Implement on and final once
+        // the change is over (a resend of the stored value is accepted). Judged before rule 4b and the state's own refusals.
+        const deviationProblem = deviationEditRefusal(body);
+        if (deviationProblem) return json(route, refusalBody(deviationProblem), deviationProblem.status);
+        // A box turned on after New needs somebody to ask (rule 4b).
+        const tickedProblem = tickedBoxProblem(body);
+        if (tickedProblem) return json(route, { message: tickedProblem }, 400);
         // A refused state change writes nothing either, not even the rest of its own request (a comment, a scope field,
         // a tick box): the backend refuses inside the one transaction.
         const refusal = typeof body.state === "string" ? manualStateRefusal(body.state, body) : null;
         if (refusal) return json(route, { message: refusal }, 400);
+        // Request Approval: somebody to ask (rules 6 and 7), then a carried-over deviation cleared (rule 8).
+        const askProblem = requestApprovalProblem(body);
+        if (askProblem) return json(route, { message: askProblem }, 400);
+        const notIncorporated = requestApprovalDeviationRefusal(body);
+        if (notIncorporated) return json(route, refusalBody(notIncorporated), notIncorporated.status);
         // The Time Change loop out of Customer Approval (a Re-schedule, or WSO2's counter / decline of a proposal).
         if (body.state === "authorize" && state === "customer_approval") {
           const refused = timeChangeRefusal(body);
@@ -1778,7 +1874,7 @@ export async function installFakeChangeRequestApi(
           if (typeof text === "string" && text.trim()) journal.push({ kind, text });
         }
         if (typeof body.implementationPlan === "string") implementationPlan = blankToNull(body.implementationPlan);
-        if (typeof body.implementationDeviation === "string") implementationDeviation = blankToNull(body.implementationDeviation);
+        if (typeof body.implementationDeviation === "string") implementationDeviation = deviationBlankToNull(body.implementationDeviation);
         // Checkbox edits: the gate above has refused every one that is not allowed.
         if (typeof body.customerApprovalRequired === "boolean") flags.customerApprovalRequired = body.customerApprovalRequired;
         if (typeof body.customerReviewRequired === "boolean") flags.customerReviewRequired = body.customerReviewRequired;

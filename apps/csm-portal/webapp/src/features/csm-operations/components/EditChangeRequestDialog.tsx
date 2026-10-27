@@ -57,6 +57,7 @@ import ChangeRequestScopeFields, {
   ChangeRequestCustomerGroupField,
 } from "@features/csm-operations/components/ChangeRequestScopeFields";
 import { useChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
+import CarriedOverDeviationField from "@features/csm-operations/components/CarriedOverDeviationField";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
 import {
   backendUtcToZonedInput,
@@ -85,6 +86,7 @@ import {
   customerRequirementOnceSavedHelper,
   customerReviewLockedReason,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
+  implementationDeviationClearable,
   implementationDeviationLockedReason,
   implementationDeviationOffered,
   isChangeRequestCreationPhase,
@@ -248,11 +250,16 @@ function useRichTextPlanField(storedHtml?: string | null): RichTextPlanField {
  * change once Request Approval scheduled it) every field is read-only
  * (`changeRequestApprovedReadOnlyReason`): the form shows them disabled under
  * the reason and offers a work note and the DEVIATION FROM THE IMPLEMENTATION
- * PLAN, which is all the backend accepts then (400
+ * PLAN from Implement on, which is all the backend accepts then (400
  * `change_request_approved_read_only` otherwise). The deviation has a lock of
- * its own (`implementationDeviationLockedReason`): final once the change is
- * closed, canceled or rolled back (400 `change_request_deviation_final`).
- * Before the approval it is shown only when one is stored (a clone carried it).
+ * its own (`implementationDeviationLockedReason`, judged on the stored state):
+ * editable in implement, review and customer_review; before that read-only (400
+ * `change_request_deviation_not_yet`) and final once the change is closed,
+ * canceled or rolled back (400 `change_request_deviation_final`), shown only
+ * when one is stored. In New a stored one can only have been carried over by a
+ * clone: it is shown read-only under the plan with a "Clear deviation" action
+ * (`implementationDeviationClearable`), sent as `implementationDeviation: ""`
+ * with the save, because Request Approval is refused while it is there.
  * A work note can be added with any save, before the approval too.
  *
  * Deliberately NOT here, even though the backend's write contract accepts
@@ -296,15 +303,19 @@ export default function EditChangeRequestDialog({
   const initialCustomerApprovalRequired = cr.customerApprovalRequired ?? false;
   const initialCustomerReviewRequired = cr.customerReviewRequired ?? false;
   // Once approved, every field is read-only: only a work note can be added, and,
-  // until the change is closed, canceled or rolled back, the deviation from the plan.
+  // from Implement until the change is closed, canceled or rolled back, the
+  // deviation from the plan.
   const approvedLock = changeRequestApprovedReadOnlyReason(cr.state);
   const approvedNotice = changeRequestApprovedNotice(cr.state);
   const fieldsDisabled = isSaving || !!approvedLock;
-  // The deviation is not under that lock: it is final once the change is closed,
-  // canceled or rolled back, and is offered from the approval on (earlier only
-  // when one is stored, e.g. a clone carried it).
-  const deviationLocked = implementationDeviationLockedReason(cr.state);
+  // The deviation is not under that lock: it is recorded in implement, review
+  // and customer_review, and elsewhere shown read-only when one is stored. In New
+  // a stored one (a clone carried it) can be cleared, and has to be before
+  // Request Approval.
+  const deviationLocked = implementationDeviationLockedReason(cr.state, cr.implementationDeviation);
   const showDeviation = implementationDeviationOffered(cr.state, cr.implementationDeviation);
+  const deviationClearable = implementationDeviationClearable(cr.state, cr.implementationDeviation);
+  const [deviationCleared, setDeviationCleared] = useState(false);
   const initialTitle = cr.subject ?? "";
   const [title, setTitle] = useState(initialTitle);
   const initialImpact = changeRequestImpactValue(cr.impact);
@@ -382,6 +393,8 @@ export default function EditChangeRequestDialog({
   const testPlan = useRichTextPlanField(cr.testPlan);
   const implementationPlan = useRichTextPlanField(cr.implementationPlan);
   const implementationDeviation = useRichTextPlanField(cr.implementationDeviation);
+  // Only an edit the backend can take is sent (or changes the button's label).
+  const deviationEdited = implementationDeviation.isDirty && !deviationLocked;
   const affectedServicesText = useRichTextPlanField(cr.affectedServicesText);
   const affectedComponentsText = useRichTextPlanField(cr.affectedComponentsText);
   const description = useRichTextPlanField(cr.description);
@@ -432,8 +445,10 @@ export default function EditChangeRequestDialog({
     if (rollbackPlan.isDirty) next.rollbackPlan = rollbackPlan.outgoing;
     if (testPlan.isDirty) next.testPlan = testPlan.outgoing;
     if (implementationPlan.isDirty) next.implementationPlan = implementationPlan.outgoing;
-    if (implementationDeviation.isDirty && !deviationLocked) {
+    if (deviationEdited) {
       next.implementationDeviation = implementationDeviation.outgoing;
+    } else if (deviationClearable && deviationCleared) {
+      next.implementationDeviation = "";
     }
     if (affectedServicesText.isDirty) next.affectedServicesText = affectedServicesText.outgoing;
     if (affectedComponentsText.isDirty) next.affectedComponentsText = affectedComponentsText.outgoing;
@@ -506,9 +521,10 @@ export default function EditChangeRequestDialog({
     testPlan.outgoing,
     implementationPlan.isDirty,
     implementationPlan.outgoing,
-    implementationDeviation.isDirty,
+    deviationEdited,
     implementationDeviation.outgoing,
-    deviationLocked,
+    deviationClearable,
+    deviationCleared,
     affectedServicesText.isDirty,
     affectedServicesText.outgoing,
     affectedComponentsText.isDirty,
@@ -617,10 +633,22 @@ export default function EditChangeRequestDialog({
     );
   };
 
-  // The deviation from the implementation plan: its own lock (final once the
-  // change is over), never the approved one. Once approved it sits at the top
-  // with the work note, as the inputs left; before that, under the plan.
-  const deviationField = showDeviation ? (
+  // The deviation from the implementation plan: its own lock (recorded from
+  // Implement on, final once the change is over), never the approved one. Once
+  // approved it sits at the top with the work note, as the inputs left; before
+  // that, under the plan -- in New, where a clone carried it over, read-only with
+  // the action that clears it.
+  const deviationField = !showDeviation ? null : deviationClearable ? (
+    <CarriedOverDeviationField
+      id="cr-edit-implementation-deviation"
+      html={cr.implementationDeviation ?? ""}
+      cleared={deviationCleared}
+      onClearedChange={setDeviationCleared}
+      clearedText="It is cleared when you save."
+      disabled={isSaving}
+      sx={FULL_ROW}
+    />
+  ) : (
     <ExpandableRichTextField
       id="cr-edit-implementation-deviation"
       label="Deviation from the implementation plan"
@@ -634,7 +662,7 @@ export default function EditChangeRequestDialog({
       }
       sx={FULL_ROW}
     />
-  ) : null;
+  );
 
   // Internal only: a work note is journaled with the save and never shown to the
   // customer. The one input left once the change has been approved.
@@ -1050,7 +1078,7 @@ export default function EditChangeRequestDialog({
         onClick={() => onSave(patch)}
         disabled={isSaving || !hasChanges || plannedEndBeforeStart || (titleMissing && !approvedLock)}
       >
-        {isSaving ? "Saving…" : approvedLock && !implementationDeviation.isDirty ? "Add work note" : "Save"}
+        {isSaving ? "Saving…" : approvedLock && !deviationEdited ? "Add work note" : "Save"}
       </Button>
     </>
   );

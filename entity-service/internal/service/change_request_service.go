@@ -395,9 +395,8 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	mirrorReq := req
 	mirrorReq.CustomerApprovalRequired, mirrorReq.CustomerReviewRequired = nil, nil
 	mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil
-	// The deviation from the implementation plan has no field in ServiceNow's
-	// change request API (checked on wso2.service-now.com: nothing on the form or
-	// the table records one), so it stays PostgreSQL-only.
+	// The deviation from the implementation plan: the previous system's change
+	// request API has no field for it, so it stays PostgreSQL-only.
 	mirrorReq.ImplementationDeviation = nil
 	// The conversation about a time the customer proposed (confirmCustomerUpdatedDate,
 	// expectedCustomerUpdatedOn) has no field in the previous system's change request API: it stays
@@ -577,6 +576,13 @@ func (s *changeRequestService) createChangeRequestPortal(ctx context.Context, re
 // generated -- see that method's own doc comment for why there is no wso2ID
 // parameter here, unlike case's equivalent.
 func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+	// A customer may not carry a deviation from the implementation plan into a
+	// create (403). Judged here, before the previous system is called, for the
+	// same reason as the checks below; CreateChangeRequestFromServiceNow judges it
+	// again.
+	if err := repository.RefuseExternalCreateDeviation(ctx, req.ImplementationDeviation); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	// Reject an unsupported type before ServiceNow ever sees the request --
 	// this check is deterministic and needs no I/O, so there's no reason to
 	// defer it to CreateChangeRequestFromServiceNow's own check (which runs
@@ -635,7 +641,8 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	mirrorReq := req
 	mirrorReq.ProjectID, mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil, nil
 	// A clone's deviation from the implementation plan is PostgreSQL-only, as on
-	// PATCH: ServiceNow has no field for it. PostgreSQL still gets it (req).
+	// PATCH: the previous system's change request API has no field for it.
+	// PostgreSQL still gets it (req).
 	mirrorReq.ImplementationDeviation = nil
 	if mirrorReq.PlannedStartDate != nil {
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedStartDate)

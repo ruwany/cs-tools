@@ -1085,26 +1085,67 @@ export const CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON =
 
 /**
  * The Edit form's notice for an approved change request: the fields are read-only,
- * and until the change is closed, canceled or rolled back a deviation from the
- * implementation plan can still be recorded beside the work notes. `null` before the approval.
+ * and from Implement on, until the change is closed, canceled or rolled back, a
+ * deviation from the implementation plan can still be recorded beside the work
+ * notes (in Customer Approval and Scheduled implementation has not started yet).
+ * `null` before the approval.
  */
 export function changeRequestApprovedNotice(state?: string | null): string | null {
   if (!changeRequestApprovedReadOnlyReason(state)) return null;
-  return implementationDeviationLockedReason(state)
-    ? CHANGE_REQUEST_APPROVED_READ_ONLY_REASON
-    : CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON;
+  return implementationDeviationRecordable(state)
+    ? CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON
+    : CHANGE_REQUEST_APPROVED_READ_ONLY_REASON;
 }
 
 /**
- * Why the deviation from the implementation plan can no longer be changed in
- * `state`, or `null` while it can. Mirrors the entity service's
- * `checkDeviationEditable` (change_request_deviation.go): the deviation is not
- * under the approved-content lock (it is written once the plan is fixed), but it
- * is final once the change request is closed, canceled or rolled back (400
- * `change_request_deviation_final`).
+ * The states in which the deviation from the implementation plan is recorded:
+ * implementation has started and the change request is not final yet. Mirrors
+ * the entity service's `deviationRecordableState` (change_request_deviation.go).
  */
-export function implementationDeviationLockedReason(state?: string | null): string | null {
+const IMPLEMENTATION_DEVIATION_RECORDABLE_STATES: readonly string[] = ["implement", "review", "customer_review"];
+
+/** Whether the deviation from the implementation plan can be recorded in `state`. */
+export function implementationDeviationRecordable(state?: string | null): boolean {
+  return !!state && IMPLEMENTATION_DEVIATION_RECORDABLE_STATES.includes(state);
+}
+
+/**
+ * Whether a deviation is stored, as the entity service judges it: a value with no
+ * text once its markup is removed (`isBlankHtml`: whitespace, an emptied editor's
+ * `<p><br></p>`, `&nbsp;`, an image alone) is no deviation. The entity service
+ * mirrors `isBlankHtml` (`IsBlankRichText`): it stores such a value as NULL and
+ * reads a stored one the same way, so the two sides agree. Used where the
+ * backend's own judgement decides what is possible -- clearing one a clone carried
+ * over, and Request Approval, which the backend refuses while one is stored.
+ */
+export function hasImplementationDeviation(value?: string | null): boolean {
+  return !!value && !isBlankHtml(value);
+}
+
+/** Why the deviation a clone carried over is read-only in New, and what to do with it. */
+export const IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON =
+  "Carried over from the cloned change request. Fold it into the implementation plan, then clear it before requesting approval.";
+
+/** Why the deviation from the implementation plan cannot be recorded before implementation. */
+export const IMPLEMENTATION_DEVIATION_NOT_YET_REASON =
+  "A deviation from the implementation plan can be recorded once implementation has started.";
+
+/**
+ * Why the deviation from the implementation plan cannot be edited in `state`, or
+ * `null` while it can (implement, review, customer_review). Mirrors the entity
+ * service's `checkDeviationEditable` (change_request_deviation.go), which judges
+ * the stored state: before implementation nothing can be recorded (400
+ * `change_request_deviation_not_yet`) -- in New the only change accepted is
+ * clearing one a clone carried over (`stored`), which the form offers as its own
+ * action -- and once the change request is closed, canceled or rolled back the
+ * record is final (400 `change_request_deviation_final`).
+ */
+export function implementationDeviationLockedReason(state?: string | null, stored?: string | null): string | null {
   switch (state) {
+    case "implement":
+    case "review":
+    case "customer_review":
+      return null;
     case "closed":
       return "The change request is closed, so its deviation from the implementation plan is final.";
     case "canceled":
@@ -1112,19 +1153,51 @@ export function implementationDeviationLockedReason(state?: string | null): stri
     case "rollback":
       return "The change request is rolled back, so its deviation from the implementation plan is final.";
     default:
-      return null;
+      return isChangeRequestCreationPhase(state) && hasImplementationDeviation(stored)
+        ? IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON
+        : IMPLEMENTATION_DEVIATION_NOT_YET_REASON;
   }
 }
 
 /**
- * Whether the Edit form shows the deviation field. It is written once the
- * change request has been approved (the plan is read-only by then), so it is
- * offered from the approval on; before it, and in a final state, only when one
- * is stored (a clone carried one, or the record keeps it), so it can be seen.
+ * Whether the Edit form shows the deviation field: editable in implement, review
+ * and customer_review; elsewhere read-only, and only when one is stored (a clone
+ * carried one, or the record keeps it), so it can be seen -- and, in New, cleared
+ * (`implementationDeviationClearable`).
  */
 export function implementationDeviationOffered(state: string | null | undefined, stored: string | null | undefined): boolean {
-  if (stored && !isBlankHtml(stored)) return true;
-  return !!changeRequestApprovedReadOnlyReason(state) && !implementationDeviationLockedReason(state);
+  if (implementationDeviationRecordable(state)) return true;
+  return hasImplementationDeviation(stored);
+}
+
+/**
+ * Whether the form offers "Clear deviation": a change request in New (or with no
+ * state) that has a deviation stored, which only a clone can have carried over.
+ * Clearing it is the one change of the deviation the backend accepts before
+ * implementation, and Request Approval needs it done.
+ */
+export function implementationDeviationClearable(state: string | null | undefined, stored: string | null | undefined): boolean {
+  return isChangeRequestCreationPhase(state) && hasImplementationDeviation(stored);
+}
+
+/** Why Request Approval is blocked by a deviation a clone carried over, or `null`. */
+export const REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON =
+  "Fold the carried-over deviation into the implementation plan and clear it before requesting approval";
+
+/**
+ * Request Approval (New -> Assess) is refused by the backend (400
+ * `change_request_deviation_not_incorporated`) while the change request still has
+ * a deviation from the implementation plan: one a clone carried over, which has to
+ * be folded into the implementation plan before the plan goes for approval.
+ * Offered up front as the reason the action is disabled; the Edit form clears it.
+ * Every type: the backend's rule does not depend on it.
+ */
+export function requestApprovalNeedsDeviationClearedReason(
+  cr: Pick<BeChangeRequestDetail, "state" | "implementationDeviation">,
+): string | null {
+  // Only the move out of New: a resent {state: "assess"} later is not judged.
+  if (!isChangeRequestCreationPhase(cr.state)) return null;
+  return hasImplementationDeviation(cr.implementationDeviation) ? REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON : null;
 }
 
 /**

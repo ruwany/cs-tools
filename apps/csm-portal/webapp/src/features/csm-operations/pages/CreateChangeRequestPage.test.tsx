@@ -297,7 +297,10 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     });
   });
 
-  it("seeds the deviation from the implementation plan right after the plan, and sends it on create", () => {
+  // A deviation is recorded from Implement on, so the one a clone carries over is
+  // read-only here: fold it into the plan and clear it (the new change request cannot
+  // request approval until it is cleared), or leave it, and it is sent.
+  it("seeds the deviation from the implementation plan right after the plan, read-only, and sends it on create when left", () => {
     locationState = {
       sourceNumber: "CHG0009988",
       subject: "Upgrade the gateway cluster",
@@ -310,7 +313,15 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     const values = screen.getAllByLabelText("editor").map((e) => (e as HTMLTextAreaElement).value);
     expect(values.indexOf("<p>Deviation text.</p>")).toBe(values.indexOf("<p>Implementation text.</p>") + 1);
     expect(values.indexOf("<p>Risk text.</p>")).toBe(values.indexOf("<p>Deviation text.</p>") + 1);
-    expect(screen.getByText(/Carried over from the change request this one was cloned from/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^Carried over from the cloned change request\. Fold it into the implementation plan, then clear it before requesting approval\./),
+    ).toBeInTheDocument();
+    // Read-only: an edit of the text does not reach the request.
+    const editor = screen
+      .getAllByLabelText("editor")
+      .find((e) => (e as HTMLTextAreaElement).value === "<p>Deviation text.</p>") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "<p>Edited.</p>" } });
+    expect(screen.getByRole("button", { name: "Clear deviation" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
     expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({
       implementationPlan: "<p>Implementation text.</p>",
@@ -326,10 +337,10 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
       implementationDeviation: "<p>Deviation text.</p>",
     };
     const { unmount } = render(<CreateChangeRequestPage />);
-    const editor = screen
-      .getAllByLabelText("editor")
-      .find((e) => (e as HTMLTextAreaElement).value === "<p>Deviation text.</p>") as HTMLTextAreaElement;
-    fireEvent.change(editor, { target: { value: "<p><br></p>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear deviation" }));
+    // Still on screen, to fold into the plan.
+    expect(screen.getAllByLabelText("editor").map((e) => (e as HTMLTextAreaElement).value)).toContain("<p>Deviation text.</p>");
+    expect(screen.getByText(/^Cleared: it is not copied to the new change request\./)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
     expect(postChangeRequestMutateMock.mock.calls[0][0]).not.toHaveProperty("implementationDeviation");
     unmount();
@@ -338,9 +349,10 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     locationState = { sourceNumber: "CHG0009989", subject: "Another change", type: "normal" };
     render(<CreateChangeRequestPage />);
     expect(screen.queryByText(/Deviation from the implementation plan/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear deviation" })).not.toBeInTheDocument();
   });
 
-  it("still offers the deviation after a remount when the user had emptied it (the draft keeps the blank)", () => {
+  it("keeps a cleared deviation cleared after a remount (the draft keeps the blank), and Keep deviation brings it back", () => {
     locationState = {
       sourceNumber: "CHG0009990",
       subject: "Upgrade the gateway cluster",
@@ -348,14 +360,15 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
       implementationDeviation: "<p>Deviation text.</p>",
     };
     const { unmount } = render(<CreateChangeRequestPage />);
-    const editor = screen
-      .getAllByLabelText("editor")
-      .find((e) => (e as HTMLTextAreaElement).value === "<p>Deviation text.</p>") as HTMLTextAreaElement;
-    fireEvent.change(editor, { target: { value: "<p><br></p>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear deviation" }));
     unmount();
-    // Same clone again (the draft for it is restored, with the emptied deviation).
+    // Same clone again (the draft for it is restored, with the cleared deviation).
     render(<CreateChangeRequestPage />);
-    expect(screen.getByText(/Carried over from the change request this one was cloned from/)).toBeInTheDocument();
+    expect(screen.getByText(/^Cleared: it is not copied to the new change request\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep deviation" }));
+    expect(screen.getByRole("button", { name: "Clear deviation" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({ implementationDeviation: "<p>Deviation text.</p>" });
   });
 
   it("shows a generic banner when the source number is unavailable", () => {
