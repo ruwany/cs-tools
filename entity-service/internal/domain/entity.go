@@ -1463,7 +1463,10 @@ type ProjectEngagementFields struct {
 	GoLiveDate               *time.Time `json:"goLiveDate"`
 	GoLivePlanDate           *time.Time `json:"goLivePlanDate"`
 	OnboardingExpiryDate     *time.Time `json:"onboardingExpiryDate"`
-	OnboardingStatus         *string    `json:"onboardingStatus"`
+	// OnboardingStartDate is populated on Postgres data sources only (nil
+	// elsewhere).
+	OnboardingStartDate *time.Time `json:"onboardingStartDate"`
+	OnboardingStatus    *string    `json:"onboardingStatus"`
 }
 
 type ProjectDetailsView struct {
@@ -1543,6 +1546,16 @@ type ProjectUpdateRequest struct {
 	// Must be an active internal user. Clearing the owner is not supported:
 	// null and omitted both leave it unchanged.
 	OnboardingOwner *string `json:"onboardingOwner,omitempty"`
+	// OnboardingStartDate, OnboardingGoLivePlanDate, OnboardingGoLiveDate and
+	// OnboardingExpiryDate set the project's onboarding dates, as "YYYY-MM-DD"
+	// (Postgres data sources only; rejected on the ServiceNow data source). A
+	// malformed date is a 400, as is a go-live plan, go-live or expiry date
+	// earlier than the (supplied or stored) start date. Clearing a date is not
+	// supported: null and omitted both leave it unchanged.
+	OnboardingStartDate      *string `json:"onboardingStartDate,omitempty"`
+	OnboardingGoLivePlanDate *string `json:"onboardingGoLivePlanDate,omitempty"`
+	OnboardingGoLiveDate     *string `json:"onboardingGoLiveDate,omitempty"`
+	OnboardingExpiryDate     *string `json:"onboardingExpiryDate,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -1564,10 +1577,16 @@ type ProjectUpdateResult struct {
 	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
 	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 	VerificationEnabled             *bool           `json:"verificationEnabled,omitempty"`
-	// OnboardingStatus and OnboardingOwner are populated on Postgres data
-	// sources only.
+	// OnboardingStatus, OnboardingOwner and the onboarding dates are populated
+	// on Postgres data sources only.
 	OnboardingStatus *string    `json:"onboardingStatus,omitempty"`
 	OnboardingOwner  *PersonRef `json:"onboardingOwner,omitempty"`
+	// The onboarding dates are named as the project read names them
+	// (goLiveDate, goLivePlanDate, onboardingExpiryDate).
+	OnboardingStartDate  *time.Time `json:"onboardingStartDate,omitempty"`
+	GoLivePlanDate       *time.Time `json:"goLivePlanDate,omitempty"`
+	GoLiveDate           *time.Time `json:"goLiveDate,omitempty"`
+	OnboardingExpiryDate *time.Time `json:"onboardingExpiryDate,omitempty"`
 }
 
 // ProjectConsumptionStatus represents the product consumption state and keys for a project.
@@ -2769,6 +2788,9 @@ type Case struct {
 	CreatedOn time.Time      `json:"createdOn"`
 	UpdatedOn time.Time      `json:"updatedOn"`
 	ClosedOn  *time.Time     `json:"closedOn"`
+	// ResolvedOn is set only by the update queries, which read it back after
+	// the write; the create queries leave it nil.
+	ResolvedOn *time.Time `json:"resolvedOn,omitempty"`
 }
 
 // AssignedEngineerRef is a compact reference to an assigned support engineer.
@@ -3614,8 +3636,8 @@ type UpdateCaseRequest struct {
 	// Required by ServiceNow when AddPublicComment is true (ServiceNow data source only).
 	Product *string `json:"product"`
 	// PublicTicket is the public-facing ticket/issue reference (e.g. a public GitHub
-	// issue) echoed into the public comment. Required by ServiceNow when
-	// AddPublicComment is true (ServiceNow data source only).
+	// issue) echoed into the public comment. Optional when AddPublicComment is true:
+	// a missing or blank value is sent as "N/A" (ServiceNow data source only).
 	PublicTicket *string `json:"publicTicket"`
 	// Acknowledge, when true, claims the case for the calling engineer: it records
 	// them as the acknowledger if nobody has acknowledged it yet, and otherwise
@@ -5709,6 +5731,10 @@ type SearchProductVulnerabilitiesFilters struct {
 	Priority       *VulnerabilityPriority `json:"priority,omitempty"`
 	ProductName    string                 `json:"productName,omitempty"`
 	ProductVersion string                 `json:"productVersion,omitempty"`
+	// CveID matches one CVE exactly (case- and surrounding-whitespace-insensitive,
+	// no wildcards), unlike SearchQuery's substring match. A blank value means
+	// "not provided".
+	CveID string `json:"cveId,omitempty"`
 }
 
 // SearchProductVulnerabilitiesRequest is the input for POST /products/vulnerabilities/search.
@@ -9649,9 +9675,19 @@ const (
 // is case-like) at read time, so this list can never show a stale title or
 // severity if the underlying record is later edited.
 type PendingVerification struct {
-	ID             string                             `json:"id"`
-	WorkItemID     string                             `json:"workItemId"`
-	RecordNumber   string                             `json:"recordNumber"`
+	ID           string `json:"id"`
+	WorkItemID   string `json:"workItemId"`
+	RecordNumber string `json:"recordNumber"`
+	// InternalID (work_item.wso2_id) is the record's own internal/WSO2 id
+	// (e.g. "CUPRSUB-1170", a per-project prefix + counter), distinct from
+	// RecordNumber (the record's human-readable number, e.g. "CS0441731") --
+	// the same pairing Case.InternalID/Number already carries. Unlike
+	// Case.InternalID (which stays a required, non-nullable string for
+	// cross-repo contract reasons -- see that field's own doc comment), this
+	// is a brand-new wire type with no existing contract to preserve, so it
+	// stays nil/omitted rather than "" when the joined work_item row has no
+	// wso2_id.
+	InternalID     *string                            `json:"internalId,omitempty"`
 	RecordTitle    string                             `json:"recordTitle"`
 	Severity       *string                            `json:"severity"`
 	RecordType     string                             `json:"recordType"`

@@ -238,6 +238,43 @@ export interface ScheduleAbsencesResponse {
   count: number;
 }
 
+/** Body of the confirmed engagement allocations search. At most 500 user ids
+ *  and a window of at most 70 days, both ends inclusive. */
+export interface SearchEngagementAllocationsPayload {
+  userIds: string[];
+  from: string;
+  to: string;
+}
+
+/**
+ * One confirmed customer engagement allocation: an engineer given to an
+ * engagement for a run of days. Read-only on the schedule.
+ *
+ * The server omits what it does not have, so every descriptive field is
+ * optional; `engagementType` and `modeOfDelivery` are raw enum values and are
+ * turned into words by the reader (see utils/engagementAllocations).
+ */
+export interface EngagementAllocation {
+  id: string;
+  userId: string;
+  engagementId: string;
+  /** First and last day covered, YYYY-MM-DD, both inclusive. */
+  startDate: string;
+  endDate: string;
+  allocationId?: string;
+  engagementDisplayId?: string;
+  accountName?: string;
+  engagementType?: string;
+  modeOfDelivery?: string;
+  /** Percent of the engineer's time, e.g. 50. */
+  utilization?: number;
+}
+
+export interface EngagementAllocationsResponse {
+  allocations: EngagementAllocation[];
+  count: number;
+}
+
 /** One recorded change to a team's rota or leave, as the history keeps it. */
 export interface ScheduleActivity {
   id: string;
@@ -410,7 +447,13 @@ export interface PagingReadinessResponse {
  * Somebody who may change nothing gets empty lists, and the tab is not shown.
  */
 export interface RotaAccess {
-  canManage: { rotaAdmins: boolean; markerFamilies: RotaFamily[] };
+  canManage: {
+    rotaAdmins: boolean;
+    markerFamilies: RotaFamily[];
+    /** The families whose teams' members the reader may add and remove (the
+     *  same rule as markerFamilies). Absent from an older server. */
+    memberFamilies?: RotaFamily[];
+  };
   rotaAdmins: RotaAdminGrant[];
   markers: RotaMarkerGrant[];
 }
@@ -487,6 +530,8 @@ export interface CaseAlertSettings {
 export interface CaseAlertAssignmentGroup {
   id: string;
   name: string;
+  /** The services it is the support group of. Absent from an older server. */
+  services?: string[];
 }
 
 /** A team as a route option: CRE, SRE or SME. */
@@ -516,6 +561,9 @@ export interface CaseAlertChatRoom {
   id: string;
   ladder: CaseAlertRoomLadder;
   teamKey?: string;
+  /** An SRE assignment group's own room: the group, and its current name. */
+  groupId?: string;
+  groupName?: string;
   label: string;
   enabled: boolean;
   /** Also gets the cards of an incident with no SRE team. */
@@ -602,6 +650,11 @@ export interface CaseAlertGroupRouting {
   defaultGroups?: string[];
   /** SRE: teams with a chat space but no rota of their own. */
   teamlessRooms?: string[];
+  /** SRE: the groups (lower-cased) with a chat space of their own in use. */
+  groupRooms?: string[];
+  /** SRE: whether the ladder has its shared space, where a group that maps
+   *  to no space gets its card. Absent from an older report. */
+  sharedRoom?: boolean;
 }
 
 /** One team's channel as running: the ladder's narrowed by the team's own. */
@@ -634,6 +687,18 @@ export interface CaseAlertFileOnly {
   "safety.callWithoutVerifiedLeads"?: boolean;
   "safety.callHeadsWithoutLowerTiers"?: boolean;
   "phones.source"?: string;
+  /** Whether a stopped chain replies in its thread. */
+  ackChat?: boolean;
+  /** CRE: one email per step. The lists are counted or flagged, never sent. */
+  "email.enabled"?: boolean;
+  "email.teamLists"?: number;
+  "email.creTeamList"?: boolean;
+  "email.csTeamList"?: boolean;
+  /** CRE: true when the file replaces the built-in rule table. */
+  "rules.custom"?: boolean;
+  /** CRE: minutes after the case is created that each step (L0 to L4) is
+   *  called, by severity (S0 to S4). From the code, not the file. */
+  timing?: Partial<Record<string, number[][]>>;
 }
 
 /** A rotation's reminder window: "HH:MM" on the 24-hour clock of an IANA zone. */

@@ -615,6 +615,7 @@ func main() {
 	route("GET /team-schedule/catalogue", handler.PermView, scheduleHandler.GetScheduleCatalogue)
 	route("POST /team-schedule/assignments/search", handler.PermView, scheduleHandler.SearchScheduleAssignments)
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
+	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
 	route("GET /team-schedule/on-duty", handler.PermView, scheduleHandler.GetScheduleOnDuty)
 
 	// Lead edit. PermWrite keeps the control away from a caller who could not
@@ -656,6 +657,15 @@ func main() {
 	route("DELETE /team-schedule/rota-access/admins/{family}/{userId}", handler.PermAdmin, rotaAccessHandler.DeleteRotaAdmin)
 	route("PUT /team-schedule/rota-access/markers/{teamKey}/{userId}", handler.PermWrite, rotaAccessHandler.PutRotaMarker)
 	route("DELETE /team-schedule/rota-access/markers/{teamKey}/{userId}", handler.PermWrite, rotaAccessHandler.DeleteRotaMarker)
+	// Who is on a team: a CSM admin, or the rota admin of the team's family
+	// (no portal admin), so PermWrite and entity-service decides.
+	route("PUT /team-schedule/teams/{teamKey}/members/{userId}", handler.PermWrite, rotaAccessHandler.PutTeamMember)
+	route("DELETE /team-schedule/teams/{teamKey}/members/{userId}", handler.PermWrite, rotaAccessHandler.DeleteTeamMember)
+	// A member's role and Case Alerts tier, and moving them to another team:
+	// CSM admin only, which entity-service enforces, so PermWrite like the
+	// add and remove above.
+	route("PATCH /team-schedule/teams/{teamKey}/members/{userId}", handler.PermWrite, rotaAccessHandler.PatchTeamMember)
+	route("POST /team-schedule/teams/{teamKey}/members/{userId}/move", handler.PermWrite, rotaAccessHandler.MoveTeamMember)
 	// Rota Reminders card on the Rota access tab: a family's rota reminder
 	// settings. Changed by a CSM admin or the family's rota admin, who is no
 	// portal admin, so PermWrite and entity-service decides.
@@ -689,6 +699,11 @@ func main() {
 	route("POST /runbooks/import", handler.PermWrite, runbookHandler.ImportRunbooks)
 	route("PUT /runbooks/{id}", handler.PermWrite, runbookHandler.UpdateRunbook)
 	route("DELETE /runbooks/{id}", handler.PermWrite, runbookHandler.DeleteRunbook)
+	bannerHandler := handler.NewBannerHandler(customerEntityClient)
+	route("GET /portal-banners", handler.PermView, bannerHandler.ListCSMBanners)
+	route("GET /portal-banners/manage", handler.PermAdmin, bannerHandler.ListManagedBanners)
+	route("POST /portal-banners", handler.PermAdmin, bannerHandler.CreateBanner)
+	route("PUT /portal-banners/{id}", handler.PermAdmin, bannerHandler.UpdateBanner)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)

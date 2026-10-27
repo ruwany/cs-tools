@@ -781,6 +781,14 @@ func (c *CustomerEntityClient) SearchScheduleAbsences(ctx context.Context, body 
 	return c.do(ctx, http.MethodPost, "/team-schedule/absences/search", body)
 }
 
+// SearchScheduleEngagementAllocations calls
+// POST /team-schedule/engagement-allocations/search on the entity service: the
+// confirmed customer engagement allocations of the given users over a date
+// window. Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/search", body)
+}
+
 // GetScheduleOnDuty calls GET /team-schedule/on-duty on the entity service, passing
 // the optional `at` instant through unchanged. Response is raw JSON.
 func (c *CustomerEntityClient) GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error) {
@@ -1226,6 +1234,28 @@ func (c *CustomerEntityClient) PutRotaMarker(ctx context.Context, teamKey, userI
 // DeleteRotaMarker calls DELETE /team-schedule/rota-access/markers/{teamKey}/{userId}.
 func (c *CustomerEntityClient) DeleteRotaMarker(ctx context.Context, teamKey, userID string) ([]byte, error) {
 	return c.do(ctx, http.MethodDelete, "/team-schedule/rota-access/markers/"+url.PathEscape(teamKey)+"/"+url.PathEscape(userID), nil)
+}
+
+// PutTeamMember calls PUT /team-schedule/teams/{teamKey}/members/{userId}.
+func (c *CustomerEntityClient) PutTeamMember(ctx context.Context, teamKey, userID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPut, "/team-schedule/teams/"+url.PathEscape(teamKey)+"/members/"+url.PathEscape(userID), nil)
+}
+
+// DeleteTeamMember calls DELETE /team-schedule/teams/{teamKey}/members/{userId}.
+func (c *CustomerEntityClient) DeleteTeamMember(ctx context.Context, teamKey, userID string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, "/team-schedule/teams/"+url.PathEscape(teamKey)+"/members/"+url.PathEscape(userID), nil)
+}
+
+// PatchTeamMember calls PATCH /team-schedule/teams/{teamKey}/members/{userId}:
+// a member's role and Case Alerts tier.
+func (c *CustomerEntityClient) PatchTeamMember(ctx context.Context, teamKey, userID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/team-schedule/teams/"+url.PathEscape(teamKey)+"/members/"+url.PathEscape(userID), body)
+}
+
+// MoveTeamMember calls POST /team-schedule/teams/{teamKey}/members/{userId}/move:
+// takes the person off the source team and puts them on the target in the body.
+func (c *CustomerEntityClient) MoveTeamMember(ctx context.Context, teamKey, userID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/teams/"+url.PathEscape(teamKey)+"/members/"+url.PathEscape(userID)+"/move", body)
 }
 
 // GetRotaReminderSettings calls GET /team-schedule/reminder-settings/{family}:

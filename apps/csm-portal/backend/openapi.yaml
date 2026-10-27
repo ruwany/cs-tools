@@ -17,9 +17,9 @@ info:
     | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
     | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
-    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus` or `onboardingOwner`; any other field in that body still needs `write` | onboarding-lead, admin |
+    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -2731,15 +2731,16 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Update a project's closure sub-state fields, KB/agent toggles, or onboarding status and owner.
+      summary: Update a project's closure sub-state fields, KB/agent toggles, or onboarding status, owner and dates.
       description: >
         Request body is forwarded to the integration service as-is and the
         response is returned verbatim. At least one field must be provided;
         the integration service validates this and rejects an empty update.
         Reachable by cs_engineer, onboarding_lead and admin; which fields a
         caller may set is then decided per field. onboardingStatus and
-        onboardingOwner need onboarding_lead or admin (a cs_engineer alone gets
-        403); every other field needs cs_engineer or admin (an onboarding_lead
+        onboardingOwner and the four onboarding dates (onboardingStartDate,
+        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
+        need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
         alone gets 403); closureState needs admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
         read access to the project separately: onboarding_lead grants none.
@@ -6781,7 +6782,7 @@ paths:
 
   /products/vulnerabilities/meta:
     get:
-      summary: Get reference metadata for product vulnerabilities (severity choice list).
+      summary: Get reference metadata for product vulnerabilities (severity choice list and the product / version options).
       operationId: getVulnerabilityMeta
       security:
         - bearerAuth: []
@@ -12505,7 +12506,8 @@ paths:
       description: >
         The Rota access tab. The entity service's payload, forwarded unchanged: `canManage`
         (`rotaAdmins` for a CSM admin, `markerFamilies` for the families whose rota managers the caller
-        may change), `rotaAdmins[]` and `markers[]`. A caller who may change nothing gets empty
+        may change, `memberFamilies` for the families whose teams' members they may add and remove),
+        `rotaAdmins[]` and `markers[]`. A caller who may change nothing gets empty
         lists, which is how the page decides not to show the tab.
       responses:
         "200":
@@ -12639,6 +12641,276 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /team-schedule/teams/{teamKey}/members/{userId}:
+    put:
+      summary: Add somebody to a team on the schedule.
+      operationId: putTeamScheduleTeamMember
+      description: >
+        Puts active internal staff on the team as an engineer. A CSM admin may add to any team, the
+        family's rota admin to their own family's teams; the entity service decides. Idempotent.
+      parameters:
+        - name: teamKey
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done (idempotent).
+        "400":
+          description: Bad request (not a team key, not a UUID, or refused by the entity service with its reason).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (a team not on the schedule).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Take somebody off a team on the schedule.
+      operationId: deleteTeamScheduleTeamMember
+      description: >
+        Same permission as adding; the entity service decides. Refused while the person has upcoming
+        turns on the team or holds its Case Alerts responder tier (409), or, for a rota admin, is one of
+        its leads (403); the entity service's reason is kept. Their rota manager grant for the team goes
+        with them.
+      parameters:
+        - name: teamKey
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done, or the person was not on the team.
+        "400":
+          description: Bad request (not a team key or not a UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (a team not on the schedule).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: The person has upcoming turns on the team or holds its Case Alerts tier (the entity service's reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Change a team member's role or Case Alerts tier.
+      operationId: updateTeamMember
+      description: >
+        CSM admin only; the entity service decides and its reason is kept on every refusal. Send
+        `role`, `alertTier` or both; an omitted field is unchanged and `alertTier: null` clears the
+        tier. At least one field is required and unknown fields are refused. 409 when the member
+        holds a lead-type role or another member of the team holds the requested tier. PostgreSQL
+        data source only.
+      parameters:
+        - name: teamKey
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The team the member is on.
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                role:
+                  type: string
+                  enum: [engineer, sub_lead]
+                alertTier:
+                  type: string
+                  nullable: true
+                  enum: [T1, T2, T3, null]
+      responses:
+        "200":
+          description: The member as it now stands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamScheduleTeamMember'
+        "400":
+          description: Bad request (not a team key or UUID, not JSON, empty body, unknown role or tier, or not active internal staff; the entity service reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not a CSM admin; the entity service reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (a team not on the schedule, or the person is not on the team).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: The member holds a lead-type role, or another member holds the requested tier (the entity service reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/teams/{teamKey}/members/{userId}/move:
+    post:
+      summary: Move a team member to another team on the schedule.
+      operationId: moveTeamMember
+      description: >
+        CSM admin only; the entity service decides and its reason is kept on every refusal. `teamKey`
+        is the team the person leaves and `toTeamKey` the team they join. Their role is kept and their
+        alert tier is empty on the new team. Refused with nothing written (409) while they have
+        upcoming turns or an alert tier on the source team, hold a lead-type role, or are on both
+        teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
+        source only.
+      parameters:
+        - name: teamKey
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The team the member leaves.
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toTeamKey]
+              properties:
+                toTeamKey:
+                  type: string
+                  description: The team they join; not the same as `teamKey`.
+      responses:
+        "200":
+          description: The member on the target team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamScheduleTeamMember'
+        "400":
+          description: Bad request (not a team key or UUID, not JSON, missing toTeamKey, same source and target, or not active internal staff; the entity service reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (not a CSM admin; the entity service reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found (either team is not on the schedule, or the person is not on the source team).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Refused with nothing written (upcoming turns or an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/rota-access/markers/{teamKey}/{userId}:
     put:
       summary: Make somebody a team's rota manager.
@@ -12742,6 +13014,243 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+
+  /team-schedule/reminder-settings/{family}:
+    get:
+      summary: A family's rota reminder settings.
+      operationId: getTeamScheduleRotaReminderSettings
+      description: >
+        The Rota Reminders card on the Rota access tab. The entity service's payload, forwarded
+        unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
+        weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
+        by shift code), copyTo, updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        use their built-in settings, which the card shows.
+      parameters:
+        - name: family
+          in: path
+          required: true
+          schema: { type: string, enum: [CRE, SRE, SME] }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: "Bad family."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Nothing saved for this family."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Replace a family's rota reminder settings.
+      operationId: putTeamScheduleRotaReminderSettings
+      description: >
+        The whole card form. Only the fields below are forwarded; the entity service decides who may
+        (a CSM admin or the family's rota admin) and checks the values.
+      parameters:
+        - name: family
+          in: path
+          required: true
+          schema: { type: string, enum: [CRE, SRE, SME] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weekdayEnabled, weekendEnabled, invitesEnabled]
+              properties:
+                weekdayEnabled: { type: boolean }
+                weekendEnabled: { type: boolean }
+                invitesEnabled: { type: boolean }
+                weekendRequired:
+                  type: object
+                  additionalProperties: { type: integer, minimum: 0, maximum: 20 }
+                windows:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    required: [start, end, timeZone]
+                    properties:
+                      start: { type: string, example: "08:00" }
+                      end: { type: string, example: "18:00" }
+                      timeZone: { type: string, example: America/Los_Angeles }
+                copyTo:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, format: email }
+      responses:
+        "200":
+          description: The settings as saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: "Bad request, or a value the entity service refused (its reason)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: entity-service's reason, e.g. only a CSM admin or the CRE rota admin can change the CRE rota reminder settings."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /team-schedule/reminder-requests/{family}:
+    get:
+      summary: The family's latest "Send now" rota reminder requests (5, newest first).
+      operationId: listTeamScheduleRotaReminderRequests
+      description: >
+        The entity service's payload, forwarded unchanged: {requests: [{id, family, kind, status
+        (QUEUED, SENDING, SENT, FAILED), requestedBy, requestedOn, claimedOn, handledOn, result}]}.
+      parameters:
+        - name: family
+          in: path
+          required: true
+          schema: { type: string, enum: [CRE, SRE, SME] }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: "Bad family."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Ask for the family's rota reminders to be sent now.
+      operationId: createTeamScheduleRotaReminderRequest
+      description: >
+        Queued for the scheduled task's next run. Only kind is forwarded; the entity service
+        decides who may (a CSM admin or the family's rota admin).
+      parameters:
+        - name: family
+          in: path
+          required: true
+          schema: { type: string, enum: [CRE, SRE, SME] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [weekday, weekend] }
+                test:
+                  type: boolean
+                  description: Send it only to the person asking, as a test copy; their own queue, 2 minutes apart.
+      responses:
+        "201":
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: "Bad request."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden: entity-service's reason, e.g. only a CSM admin or the CRE rota admin can send the CRE rota reminders."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "One of the same kind is already waiting to be sent."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: "One of the same kind was asked for less than 10 minutes ago (a FAILED one does not count)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 
   /runbooks:
     get:
@@ -13041,242 +13550,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /team-schedule/reminder-settings/{family}:
-    get:
-      summary: A family's rota reminder settings.
-      operationId: getTeamScheduleRotaReminderSettings
-      description: >
-        The Rota Reminders card on the Rota access tab. The entity service's payload, forwarded
-        unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
-        weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
-        by shift code), copyTo, updatedBy, updatedOn. 404 when nothing was saved: the reminders then
-        use their built-in settings, which the card shows.
-      parameters:
-        - name: family
-          in: path
-          required: true
-          schema: { type: string, enum: [CRE, SRE, SME] }
-      responses:
-        "200":
-          description: Ok.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: "Bad family."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: "Unauthorized."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: "Forbidden."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: "Nothing saved for this family."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-    put:
-      summary: Replace a family's rota reminder settings.
-      operationId: putTeamScheduleRotaReminderSettings
-      description: >
-        The whole card form. Only the fields below are forwarded; the entity service decides who may
-        (a CSM admin or the family's rota admin) and checks the values.
-      parameters:
-        - name: family
-          in: path
-          required: true
-          schema: { type: string, enum: [CRE, SRE, SME] }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [weekdayEnabled, weekendEnabled, invitesEnabled]
-              properties:
-                weekdayEnabled: { type: boolean }
-                weekendEnabled: { type: boolean }
-                invitesEnabled: { type: boolean }
-                weekendRequired:
-                  type: object
-                  additionalProperties: { type: integer, minimum: 0, maximum: 20 }
-                windows:
-                  type: object
-                  additionalProperties:
-                    type: object
-                    required: [start, end, timeZone]
-                    properties:
-                      start: { type: string, example: "08:00" }
-                      end: { type: string, example: "18:00" }
-                      timeZone: { type: string, example: America/Los_Angeles }
-                copyTo:
-                  type: array
-                  maxItems: 20
-                  items: { type: string, format: email }
-      responses:
-        "200":
-          description: The settings as saved.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: "Bad request, or a value the entity service refused (its reason)."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: "Unauthorized."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: "Forbidden: entity-service's reason, e.g. only a CSM admin or the CRE rota admin can change the CRE rota reminder settings."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /team-schedule/reminder-requests/{family}:
-    get:
-      summary: The family's latest "Send now" rota reminder requests (5, newest first).
-      operationId: listTeamScheduleRotaReminderRequests
-      description: >
-        The entity service's payload, forwarded unchanged: {requests: [{id, family, kind, status
-        (QUEUED, SENDING, SENT, FAILED), requestedBy, requestedOn, claimedOn, handledOn, result}]}.
-      parameters:
-        - name: family
-          in: path
-          required: true
-          schema: { type: string, enum: [CRE, SRE, SME] }
-      responses:
-        "200":
-          description: Ok.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: "Bad family."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: "Unauthorized."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: "Forbidden."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-    post:
-      summary: Ask for the family's rota reminders to be sent now.
-      operationId: createTeamScheduleRotaReminderRequest
-      description: >
-        Queued for the scheduled task's next run. Only kind is forwarded; the entity service
-        decides who may (a CSM admin or the family's rota admin).
-      parameters:
-        - name: family
-          in: path
-          required: true
-          schema: { type: string, enum: [CRE, SRE, SME] }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [kind]
-              properties:
-                kind: { type: string, enum: [weekday, weekend] }
-                test:
-                  type: boolean
-                  description: Send it only to the person asking, as a test copy; their own queue, 2 minutes apart.
-      responses:
-        "201":
-          description: Queued.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: "Bad request."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: "Unauthorized."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: "Forbidden: entity-service's reason, e.g. only a CSM admin or the CRE rota admin can send the CRE rota reminders."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "409":
-          description: "One of the same kind is already waiting to be sent."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "429":
-          description: "One of the same kind was asked for less than 10 minutes ago (a FAILED one does not count)."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: "Internal server error."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /team-schedule/case-alerts/settings:
     get:
       summary: Case Alerts chat rooms, group routes and ladder values, and what the caller may change.
@@ -13322,9 +13595,9 @@ paths:
       summary: Create or change a Case Alerts chat room.
       operationId: putTeamScheduleCaseAlertRoom
       description: >
-        A ladder's shared room (no teamKey), an SRE team's room, or an SME team's room (SME
-        has team rooms only). Only the fields below are forwarded; the entity service decides
-        who may.
+        A ladder's shared room (no teamKey), an SRE team's room, an SME team's room (SME
+        has team rooms only), or an SRE assignment group's room (groupId). Only the fields
+        below are forwarded; the entity service decides who may.
       requestBody:
         required: true
         content:
@@ -13335,6 +13608,12 @@ paths:
               properties:
                 ladder: { type: string, enum: [CRE, SRE, SME] }
                 teamKey: { type: string }
+                groupId:
+                  type: string
+                  format: uuid
+                  description: >
+                    An SRE assignment group (routeOptions.assignmentGroups) whose incident card and
+                    paging replies go to this room; who is called does not change. Not with teamKey.
                 label: { type: string, maxLength: 100 }
                 enabled: { type: boolean }
                 teamless: { type: boolean }
@@ -14216,6 +14495,90 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /team-schedule/engagement-allocations/search:
+    post:
+      summary: Search confirmed customer engagement allocations.
+      operationId: searchTeamScheduleEngagementAllocations
+      description: >
+        The confirmed customer engagement allocations of the given engineers
+        over a date window, shown read-only on the team schedule. Body is
+        validated by the entity service and forwarded unchanged; the response
+        is returned as sent, with enum values raw (the caller formats them).
+        `userIds` are user ids as found on a schedule assignment's
+        `engineer.userId`. Optional fields are omitted when empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userIds, from, to]
+              properties:
+                userIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+                from: { type: string, format: date, description: First day of the window, inclusive. }
+                to: { type: string, format: date, description: "Last day of the window, inclusive; at most 70 days after `from`." }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allocations, count]
+                properties:
+                  allocations:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, userId, engagementId, startDate, endDate]
+                      properties:
+                        id: { type: string, format: uuid }
+                        userId: { type: string, format: uuid }
+                        engagementId: { type: string, format: uuid }
+                        startDate: { type: string, format: date }
+                        endDate: { type: string, format: date }
+                        allocationId: { type: string }
+                        engagementDisplayId: { type: string }
+                        accountName: { type: string }
+                        engagementType: { type: string, description: "Raw enum value, for example CONSULTANCY." }
+                        modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
+                        utilization: { type: number }
+                  count: { type: integer }
         "400":
           description: Bad request.
           content:
@@ -15641,6 +16004,219 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
 
+  /portal-banners:
+    get:
+      summary: Banners for the CSM portal.
+      description: >
+        Published banners flagged for the CSM portal, in sort order. Any signed-in
+        caller with view permission. The shell hides a banner outside its start and
+        end, and a banner this browser has dismissed. Responses are Cache-Control
+        no-store.
+      operationId: listCsmPortalBanners
+      responses:
+        "200":
+          description: The banners the CSM portal may show.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalBannerViewList'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a banner.
+      description: >
+        A CSM admin. The row is saved with the status in the body. When sortOrder
+        is already used, that banner and every banner below it move down by one.
+        Responses are Cache-Control no-store.
+      operationId: createPortalBanner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePortalBannerRequest'
+      responses:
+        "201":
+          description: The banner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalBanner'
+        "400":
+          description: Invalid status, order, html, or schedule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can change banners.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /portal-banners/manage:
+    get:
+      summary: Every banner, for Settings.
+      description: >
+        Draft, published, and unpublished, in sort order. A CSM admin. Responses are
+        Cache-Control no-store.
+      operationId: listManagedPortalBanners
+      responses:
+        "200":
+          description: The Settings list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalBannerList'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can change banners.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /portal-banners/{id}:
+    put:
+      summary: Edit a banner.
+      description: >
+        A CSM admin. Status, both portal switches, the schedule, the HTML, and
+        sortOrder can all change. An occupied sortOrder shifts that banner and
+        the ones below it down. Responses are Cache-Control no-store.
+      operationId: updatePortalBanner
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePortalBannerRequest'
+      responses:
+        "200":
+          description: The banner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalBanner'
+        "400":
+          description: Invalid status, order, html, schedule, or id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can change banners.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No banner with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -15800,6 +16376,32 @@ components:
         mode: {type: string, enum: [replace, merge]}
         dryRun: {type: boolean}
         cleared: {type: integer, description: Assignments a replace removed first.}
+        leaveWrittenOver: {type: integer, description: "How many earlier absences a replace removed, shortened or split under the file's assignments."}
+        leaveCuts:
+          type: array
+          description: Each earlier absence a replace cut under the file's assignments, so a dry run shows whose leave goes before anything is written.
+          items:
+            type: object
+            required: [index, name, email, teamKey, kindCode, kindLabel, startsOn, cutFrom, cutTo, action]
+            properties:
+              index:
+                type: integer
+                description: The assignments[] entry whose worked days these are.
+              name: {type: string}
+              email: {type: string}
+              teamKey: {type: string}
+              kindCode: {type: string, example: ANNUAL_LEAVE}
+              kindLabel: {type: string}
+              startsOn: {type: string, format: date}
+              endsOn:
+                type: string
+                format: date
+                description: Absent for an absence with no end.
+              cutFrom: {type: string, format: date}
+              cutTo: {type: string, format: date}
+              action:
+                type: string
+                enum: [removed, shortened, split]
         applied: {type: integer, description: Assignment days written.}
         skipped: {type: integer, description: Assignment days the window is not worked on.}
         skippedDays:
@@ -15812,6 +16414,22 @@ components:
         absencesCreated: {type: integer}
         absencesRemoved: {type: integer, description: Earlier absences the file's spans covered entirely.}
         absencesTrimmed: {type: integer, description: Earlier absences the file's spans shortened.}
+    TeamScheduleTeamMember:
+      type: object
+      required: [teamKey, userId, role, alertTier]
+      properties:
+        teamKey:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [engineer, sub_lead]
+        alertTier:
+          type: string
+          nullable: true
+          enum: [T1, T2, T3, null]
     ErrorPayload:
       type: object
       description: >-
@@ -19645,6 +20263,38 @@ components:
                 The WSO2 staff member assigned to lead this project's onboarding. Null
                 when no owner is assigned (most projects, since it is only set for
                 onboarding-enabled projects).
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC).
+            totalOnboardingHours:
+              type: number
+              nullable: true
+              description: Total onboarding hours allotted to the project.
+            consumedOnboardingHours:
+              type: number
+              nullable: true
+              description: Onboarding hours consumed so far (reported as a non-negative value).
+            remainingOnboardingHours:
+              type: number
+              nullable: true
+              description: Onboarding hours remaining.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC).
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC).
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC).
 
     ProjectAccountRef:
       type: object
@@ -19677,8 +20327,8 @@ components:
         simple toggles; the closure-state fields track sub-states of an
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
-        onboardingStatus and onboardingOwner require the onboarding_lead or
-        admin role; every other field requires the ordinary write permission
+        onboardingStatus, onboardingOwner and the four onboarding dates
+        require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
       properties:
         onboardingStatus:
@@ -19697,6 +20347,38 @@ components:
             active internal user (otherwise 400); clearing the owner is not
             supported. Requires onboarding_lead or admin -- a 403 for a
             cs_engineer alone.
+        onboardingStartDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding start date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
+        onboardingGoLivePlanDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding planned go-live date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
+        onboardingGoLiveDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding actual go-live date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
+        onboardingExpiryDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding expiry date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
         hasAgent:
           type: boolean
         hasKbReferences:
@@ -19770,6 +20452,26 @@ components:
                 - $ref: '#/components/schemas/PersonRef'
               nullable: true
               description: Present on Postgres data sources only.
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC). Present on Postgres data sources only.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC). Present on Postgres data sources only.
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC). Present on Postgres data sources only.
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC). Present on Postgres data sources only.
 
     DeploymentCreatePayload:
       type: object
@@ -21808,6 +22510,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChoiceListItem'
+        products:
+          type: array
+          description: >-
+            Distinct product names found on vulnerability records, each with the distinct
+            product versions recorded for it. The values are the exact stored strings, so
+            each one can be passed back as the productName / productVersion search filter.
+          items:
+            $ref: '#/components/schemas/VulnerabilityProductOption'
+
+    VulnerabilityProductOption:
+      type: object
+      required: [name, versions]
+      properties:
+        name:
+          type: string
+          description: Distinct product name.
+        versions:
+          type: array
+          description: Distinct versions found for this product, sorted ascending (may be empty).
+          items:
+            type: string
 
     SearchProductVulnerabilitiesResponse:
       type: object
@@ -26426,6 +27149,105 @@ components:
           type: boolean
         information:
           $ref: '#/components/schemas/SplScanInformation'
+
+    PortalBanner:
+      type: object
+      required: [id, status, sortOrder, visibleInCustomerPortal, visibleInCsmPortal, html, startsAt, expiresAt, createdOn, createdBy, updatedOn, updatedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [draft, published, unpublished]
+        sortOrder:
+          type: integer
+          minimum: 0
+          description: 0 is the top of the page.
+        visibleInCustomerPortal:
+          type: boolean
+        visibleInCsmPortal:
+          type: boolean
+        html:
+          type: string
+          description: The whole banner. A close button in the HTML uses data-close-banner. data-id is the row id.
+        startsAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+    PortalBannerList:
+      type: object
+      required: [banners]
+      properties:
+        banners:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortalBanner'
+    PortalBannerView:
+      type: object
+      required: [id, sortOrder, html, startsAt, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sortOrder:
+          type: integer
+        html:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+    PortalBannerViewList:
+      type: object
+      required: [banners]
+      properties:
+        banners:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortalBannerView'
+    SavePortalBannerRequest:
+      type: object
+      required: [status, sortOrder, visibleInCustomerPortal, visibleInCsmPortal, html]
+      properties:
+        status:
+          type: string
+          enum: [draft, published, unpublished]
+        sortOrder:
+          type: integer
+          minimum: 0
+        visibleInCustomerPortal:
+          type: boolean
+        visibleInCsmPortal:
+          type: boolean
+        html:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
 
     ScanResponse:
       type: object
