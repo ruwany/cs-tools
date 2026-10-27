@@ -486,7 +486,8 @@ export const PROPOSER_NOT_RECORDED_ACCEPT_REASON =
 
 /** What the banner adds for a stored time nobody is recorded as having proposed: what it may be, and what is still true. */
 export const STORED_TIME_ADVICE =
-  "It may have been written by someone at WSO2, be left over from an earlier cycle, or have been proposed by someone who is no longer a registered contact of the project, " +
+  "It may have been written by someone at WSO2, be left over from an earlier cycle, have been proposed by someone who is no longer a registered contact of the project, " +
+  "or be a customer's time from before proposers were recorded that this change request was edited after, " +
   "so there is no proposal to accept. " +
   'The customer is still being asked to approve the planned time; use "Propose a different time" to ask them to approve another time, or this one.';
 
@@ -1172,7 +1173,8 @@ export function implementationDeviationOffered(state: string | null | undefined,
 
 /**
  * Whether the form offers "Clear deviation": a change request in New (or with no
- * state) that has a deviation stored, which only a clone can have carried over.
+ * state) that has a deviation stored, which only its create can have carried (this
+ * app sends one only for a clone; a save in New can only clear it).
  * Clearing it is the one change of the deviation the backend accepts before
  * implementation, and Request Approval needs it done.
  */

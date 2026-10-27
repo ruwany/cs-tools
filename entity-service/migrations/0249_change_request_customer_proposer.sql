@@ -26,18 +26,21 @@
 -- staff save after a customer's proposal (a work note, a comment, the hold) made the proposal
 -- read "nobody is recorded" and Accept was refused. The record survives those writes. It names a
 -- proposer only while customer_proposed_for is the stored time itself: a stored time that moved
--- by any other writer is not the one recorded. A row with customer_proposed_for NULL (a proposal
--- made before this migration, still waiting) keeps the old last-writer rule; see
+-- by any other writer is not the one recorded. A row with customer_proposed_for NULL keeps the old
+-- last-writer rule: a proposal made before this migration and still waiting, or a time another
+-- writer stores later on a change that has had no proposal since it entered Customer Approval; see
 -- change_request_customer_proposal.go.
 --
 -- The trigger voids the record whenever a change request ENTERS Customer Approval: a proposal is
 -- an answer to one customer request, and a time left over from an earlier round is nobody's
--- proposal in the new one. It keeps customer_proposed_for at the stored time (so the row is not
--- read with the old last-writer rule) and clears who and when. A change re-enters Customer Approval
--- when an old-flow Re-schedule still in flight finishes through the CAB, or through another writer
--- (a manual fix, an import); the trigger covers both, as 0052 does for the confirmation. A plain
--- Re-schedule starts a new round without moving the state, so the trigger does not see it: that
--- PATCH voids the record the same way in its own UPDATE (patchChangeRequestTx).
+-- proposal in the new one. It sets customer_proposed_for to the stored time and clears who and
+-- when, so when a time is stored the row is not read with the old last-writer rule (with none
+-- stored, customer_proposed_for stays NULL until the next proposal). A change re-enters Customer
+-- Approval when an old-flow Re-schedule still in flight finishes through the CAB, or through
+-- another writer (a manual fix, an import); the trigger covers both, as 0052 does for the
+-- confirmation. A plain Re-schedule starts a new round without moving the state, so the trigger
+-- does not see it: that PATCH voids the record the same way in its own UPDATE
+-- (patchChangeRequestTx).
 --
 -- Safe to run again: every statement is guarded or replaces itself
 -- (TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain). One transaction, so a

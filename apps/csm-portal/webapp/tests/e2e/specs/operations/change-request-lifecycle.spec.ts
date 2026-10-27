@@ -1645,6 +1645,10 @@ test.describe("change request lifecycle — the deviation from the implementatio
       implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
     });
     await expect(page).toHaveURL(new RegExp(`/operations/change-requests/${FAKE_CR_ID}$`));
+    // The fake holds one change request, so the new change has the id of the one cloned (in Review), whose
+    // detail the page still holds in its query cache; reading it again shows the new change in New.
+    await page.reload();
+    await expect(detail.stage("New")).toHaveText("New, current");
 
     // The new change, in New, cannot request approval until the deviation is folded into the plan and cleared.
     const blocked = page.getByLabel(

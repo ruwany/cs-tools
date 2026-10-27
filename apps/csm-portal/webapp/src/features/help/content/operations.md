@@ -278,9 +278,10 @@ From the detail page a CS engineer can:
   except the work note and, once implementation has started, the **Deviation from the
   implementation plan**, which you can record (and correct) while the
   change request is in Implement, Review or Customer Review; once it is closed,
-  canceled or rolled back it is final. The deviation is internal: customers never see it. The Customer Project, deployments and
-  deployment products can only be changed until implementation starts; the
-  deployment products follow from the chosen deployments and are not picked.
+  canceled or rolled back it is final. The deviation is internal: customers never see it. The Customer Project is
+  fixed once approval has been requested, and the deployments and deployment
+  products once the change request is approved; the deployment products follow
+  from the chosen deployments and are not picked.
   What the customer has confirmed isn't editable here — it is recorded by the
   customer's approval itself.
 - Add comments (public or internal) and upload/download attachments. A comment's own author,

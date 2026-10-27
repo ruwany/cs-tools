@@ -190,7 +190,8 @@ func deviationEditRefusal(state string, stored, clearing bool) error {
 // assess} on a change still in the creation phase): it is refused while the
 // deviation in effect is not blank -- the request's own value when it carries
 // the field, else the stored one, both by the blank rule above. A deviation in
-// New can only have been carried over by a clone, and the change has to go for
+// New can only have come from the create (the CSM webapp sends one only for a
+// clone; a PATCH in New can only clear it), and the change has to go for
 // approval with it folded into its implementation plan; clearing it (and editing
 // the plan) in the same PATCH is accepted. A resend on a change that has already
 // left New is not Request Approval and is never judged here.

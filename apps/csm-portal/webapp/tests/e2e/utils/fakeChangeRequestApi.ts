@@ -36,7 +36,8 @@
 //     In the backend's order: the edit rule right after the approved lock, ahead of rule 4b
 //     (`nobodyToAskMessage` for a box turned on) and of the state's own refusals, Request
 //     Approval's project / contact rules included; the Request Approval rule after those. (The
-//     on-hold gate is checked first here; the backend checks it after all of these.)
+//     on-hold gate is checked first here; the backend checks it after the approved lock, the
+//     edit rule and rule 4b, and before the state's own refusals and Request Approval's rules.)
 //   - `legalNextStates` offers no manual way to `scheduled` at all, nor to `closed`
 //     out of `customer_review`: staff never record a customer's approval or review.
 //     They are given by the customer, in the Customer Portal (a manual PATCH of

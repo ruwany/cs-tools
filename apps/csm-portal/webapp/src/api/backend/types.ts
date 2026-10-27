@@ -2931,8 +2931,9 @@ export interface BeChangeRequestCustomerProposal {
    * Whether the backend can name the proposer (present only while `answer` is `pending`): `true` while
    * the customer's proposal recorded its proposer, the record is about the stored time and that person is
    * still a registered contact of the project (a later staff edit does not change it; a plain Re-schedule or
-   * re-entering Customer Approval starts a new round and voids it; a time stored before the record existed
-   * is judged by the change request's last writer); `false` when it is not knowable --
+   * re-entering Customer Approval starts a new round and voids it; a time stored with no record -- before the
+   * record existed, or written later by another writer on a change request that has had no proposal since it
+   * entered Customer Approval -- is judged by the change request's last writer); `false` when it is not knowable --
    * a date a WSO2 user wrote in the previous system, one left over from an older cycle, one whose contact
    * has left the project, or a sync rewrite. The page must then say the proposer is not recorded rather
    * than guess. Absent on a backend that predates it: the page falls back to whether a name or an email

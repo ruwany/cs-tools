@@ -1671,9 +1671,11 @@ describe("a time the customer proposed (the previous system's customer_updated_o
       expect(PROPOSER_NOT_RECORDED_ACCEPT_REASON).toMatch(/so it cannot be accepted/);
       expect(PROPOSER_NOT_RECORDED_ACCEPT_REASON).toMatch(/Propose a different time/);
       expect(STORED_TIME_ADVICE).toMatch(/no proposal to accept/);
-      // A customer's own proposal stays recorded through later staff edits, so the page no longer offers that as a reason;
-      // a contact who has left the project is one.
-      expect(STORED_TIME_ADVICE).not.toMatch(/edited after|last edit/);
+      // A customer's own proposal stays recorded through later staff edits, so a later edit is a reason only for a time
+      // proposed before proposers were recorded (still judged by the last writer); a contact who has left the project is one.
+      expect(STORED_TIME_ADVICE).not.toMatch(/last edit/);
+      expect(STORED_TIME_ADVICE.match(/edited after/g)).toHaveLength(1);
+      expect(STORED_TIME_ADVICE).toMatch(/a customer's time from before proposers were recorded that this change request was edited after/);
       expect(STORED_TIME_ADVICE).toMatch(/no longer a registered contact of the project/);
       expect(STORED_TIME_ADVICE).toMatch(/still being asked to approve the planned time/);
       // Nothing there invites the engineer to check and accept it anyway.

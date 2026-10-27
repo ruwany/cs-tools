@@ -56,7 +56,7 @@ The files below are where each scenario is tested first; most scenarios appear i
 
 ## Appendix A. Go test functions (snapshot)
 
-`entity-service/internal/repository`: 39 files, 391 test functions. Subtests (`t.Run`) are in addition. The one test function whose name carries the previous system's name (the test of the mirror to it) is counted in its file's total but not listed by name; the `grep` in section 2 lists every one.
+`entity-service/internal/repository`: 42 files, 418 test functions. Subtests (`t.Run`) are in addition. The one test function whose name carries the previous system's name (the test of the mirror to it) is counted in its file's total but not listed by name; the `grep` in section 2 lists every one.
 
 **`change_request_approvals_group_integration_test.go`** (integration, 1)
 - TestChangeRequestFlowIntegration_ApprovalsCarryTheAssignmentGroup
@@ -185,6 +185,27 @@ The files below are where each scenario is tested first; most scenarios appear i
 
 **`change_request_deployment_rls_integration_test.go`** (integration, 1)
 - TestChangeRequestDeploymentRLS_InternalSessionCanUpsertWhatTheSyncWrites
+
+**`change_request_deviation_integration_test.go`** (integration, 8)
+- TestChangeRequestDeviationIntegration_PerState
+- TestChangeRequestDeviationIntegration_FinalStatesKeepTheRecord
+- TestChangeRequestDeviationIntegration_TheStoredStateIsJudged
+- TestChangeRequestDeviationIntegration_RequestApprovalNeedsItFoldedIn
+- TestChangeRequestDeviationIntegration_CreateCarriesIt
+- TestChangeRequestDeviationIntegration_CustomersNeverReadOrWriteIt
+- TestChangeRequestDeviationIntegration_BlankMarkupIsNoDeviation
+- TestChangeRequestDeviationIntegration_ACustomerCannotCreateWithOne
+
+**`change_request_deviation_test.go`** (unit, 9)
+- TestNormalizeImplementationDeviation
+- TestSameImplementationDeviation
+- TestRefuseExternalCreateDeviation
+- TestCreateChangeRequest_RefusesACustomersDeviationBeforeAnyWrite
+- TestDeviationFinalMsg
+- TestDeviationNotYetMsg
+- TestDeviationEditRefusal_PerState
+- TestCheckDeviationEditable_RecordableStatesAreNotJudged
+- TestCheckRequestApprovalDeviationCleared_RequestValue
 
 **`change_request_emergency_integration_test.go`** (integration, 10)
 - TestChangeRequestEmergencyIntegration_CreateRefusesTheBoxes
@@ -532,6 +553,12 @@ The files below are where each scenario is tested first; most scenarios appear i
 - TestParseExpectedTimestamp
 - TestRedactInternalApprovalStages
 
+**`rich_text_blank_test.go`** (unit, 4; the blank rule of the deviation, not only of change requests)
+- TestIsBlankRichText
+- TestIsBlankRichText_EmptyEditorMarkup
+- TestIsBlankRichText_LinearTime
+- TestIsBlankRichText_TooDeepIsNotBlank
+
 Service, domain, error-code, route and BFF tests (the tests of the other data source's service files are not listed here):
 
 **`entity-service/internal/service/change_request_filters_test.go`** (8)
@@ -585,6 +612,12 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 **`entity-service/internal/service/change_request_service_lock_test.go`** (1)
 - TestChangeRequestService_PatchChangeRequest_RefusalIsNeverMirrored
 
+**`entity-service/internal/service/change_request_service_deviation_test.go`** (5; the test of the data source that talks to the previous system directly is counted, not listed)
+- TestChangeRequestService_PatchChangeRequest_DeviationAloneIsAPatch
+- TestChangeRequestService_PatchChangeRequest_DeviationStaysOutOfTheMirror
+- TestChangeRequestService_CreateChangeRequest_CarriesTheDeviationToPostgresOnly
+- TestChangeRequestService_CreateChangeRequest_RefusesACustomersDeviationBeforeThePreviousSystem
+
 **`entity-service/internal/service/cr_notice_service_test.go`** (16)
 - TestApprovalNotice_StateTable
 - TestApprovalNotice_OnlyOnTransition
@@ -613,8 +646,9 @@ Service, domain, error-code, route and BFF tests (the tests of the other data so
 - TestWriteJSONWithCode_AddsErrorCodeBesideTheMessage
 - TestCodes_AreStableLowerSnakeCase
 
-**`entity-service/internal/server/change_request_routes_test.go`** (1)
+**`entity-service/internal/server/change_request_routes_test.go`** (2)
 - TestChangeRequestLinkOptionsIsInternalOnly
+- TestChangeRequestCreateIsInternalOnly
 
 **`apps/csm-portal/backend/internal/handler/change_requests_test.go`** (19)
 - TestCreateChangeRequest

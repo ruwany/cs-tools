@@ -4559,11 +4559,12 @@ type CreateChangeRequestRequest struct {
 	PlannedStartDate    *string                `json:"plannedStartDate,omitempty"`
 	PlannedEndDate      *string                `json:"plannedEndDate,omitempty"`
 
-	// ImplementationDeviation: see ChangeRequest.ImplementationDeviation. A
-	// create carries it only for a clone of a change request that has one; a
-	// blank value (no text once its markup is removed, such as an emptied
-	// editor's "<p><br></p>") is not stored. The new change request then has to
-	// fold it into its implementation plan and clear it before Request Approval.
+	// ImplementationDeviation: see ChangeRequest.ImplementationDeviation. It is
+	// meant for a clone of a change request that has one (the CSM webapp sends it
+	// only then), but any staff create may carry it; a blank value (no text once
+	// its markup is removed, such as an emptied editor's "<p><br></p>") is not
+	// stored. The new change request then has to fold it into its implementation
+	// plan and clear it before Request Approval.
 	// Staff only: a create from a customer carrying one is refused (403). A
 	// backing data source that cannot store it refuses a non-blank one (400),
 	// and it is never mirrored to the previous system.
@@ -5595,17 +5596,21 @@ type ChangeRequestCustomerProposal struct {
 	// recorded as having proposed the time: while the answer is "pending", true when the
 	// proposal's own record (customer_proposed_by_user_id, written with the proposal) is
 	// about the stored time and names a contact who is still a registered contact of the
-	// project. A later write to the change by anybody else does not change it. A time
-	// stored before migration 0249 has no record and is read by the rule that held before
-	// it: the change's last writer (work_item.updated_by) when that is a registered
-	// contact. No comment, audit or other log is read. False when nobody is recorded -- a
-	// date a WSO2 user wrote in the previous system, one left over from an older cycle, a
-	// contact who has left the project. A time nobody is
-	// recorded as having proposed is not a proposal WSO2 can accept (CanAccept is false,
-	// Accept is refused) and the banner says the proposer is not recorded; proposing a
-	// different time is the way on, and the customer then approves it. Absent unless
-	// pending. A customer is only ever shown a pending time that somebody is recorded as
-	// having proposed (otherwise they read "unanswered").
+	// project. A later write to the change by anybody else (a work note, the hold, another
+	// writer's write to the work item) does not change it; only a new round does: entering
+	// Customer Approval, or a plain Re-schedule, voids it. A change with no record
+	// (customer_proposed_for NULL: a time stored before migration 0249, or one written later
+	// by another writer on a change that has had no proposal since it entered Customer
+	// Approval) is read by the rule that held before 0249: the change's last writer
+	// (work_item.updated_by) when that is a registered contact. No comment, audit or other
+	// log is read. False when nobody is recorded -- a date a WSO2 user wrote in the
+	// previous system, one left over from an older cycle, a stored time another writer
+	// moved off its record, a contact who has left the project or whose user was deleted.
+	// A time nobody is recorded as having proposed is not a proposal WSO2 can accept
+	// (CanAccept is false, Accept is refused) and the banner says the proposer is not
+	// recorded; proposing a different time is the way on, and the customer then approves
+	// it. Absent unless pending. A customer is only ever shown a pending time that
+	// somebody is recorded as having proposed (otherwise they read "unanswered").
 	ProposerRecorded *bool `json:"proposerRecorded,omitempty"`
 	// ProposedByName / ProposedByEmail / ProposedOn: the proposer and the time, only
 	// for a staff reader, only while pending and ProposerRecorded is true.

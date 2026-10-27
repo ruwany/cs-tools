@@ -4913,9 +4913,9 @@ The rules, in the order they are applied (**the first failing one wins, every re
    with no text is none) -- is not blank ->
    `approval cannot be requested until the deviation from the implementation plan carried over from the cloned change request
    has been folded into the implementation plan and cleared`, errorCode `change_request_deviation_not_incorporated`. A
-   deviation in New can only have come from a clone (a create carries it; a PATCH in New can only clear it), and the change
-   has to go for approval (Assess, then CAB, for a Normal change; CAB for an Emergency change; Scheduled or Customer Approval
-   for a Standard change) with it folded into its plan. Clearing it in the same PATCH as
+   deviation in New can only have come from a create (the CSM webapp sends one only for a clone; a PATCH in New can only clear
+   it), and the change has to go for approval (Assess, then CAB, for a Normal change; CAB for an Emergency change; Scheduled
+   or Customer Approval for a Standard change) with it folded into its plan. Clearing it in the same PATCH as
    Request Approval (with the plan edited, or not) is accepted; a resend of `{state: "assess"}` on a change that already left
    New is not judged, as for rules 6 and 7. Every type. It runs AFTER rules 6 and 7, which keep their words and precedence,
    and after the deviation's own edit rule (`checkDeviationEditable`, under the gate), which refuses a request that sets or
@@ -5202,8 +5202,10 @@ read and create on a database without it (the older build never names it, so the
   before it takes the system one). The customer portal's backend-v2 drops it anyway (its typed detail has no field for it).
 - **No side effect on a customer's proposed time.** A proposal only waits in Customer Approval (see "A customer's proposed
   time"), where the deviation cannot be recorded, and its proposer is recorded in columns of its own (migration 0249, "Who
-  proposed it") that no staff PATCH writes, so neither recording the deviation nor any other staff save can make a waiting
-  proposal read "nobody is recorded".
+  proposed it") that no ordinary staff edit writes: the only staff PATCH that writes them is a plain Re-schedule, which
+  voids them, and only when no proposal waits (the 0249 trigger voids them too, on entering Customer Approval). So neither
+  recording the deviation nor any other staff save can make a recorded proposal read "nobody is recorded". A legacy one
+  (stored with no record, see "Legacy" there) is still read by its last writer, so any staff save still un-records it.
 - **Not built:** no activity entry (change requests have no activity feed; the outbox trigger records the
   column change like any other), no bulk edit.
 - Tests: `rich_text_blank_test.go` (the blank rule against isBlankHtml's answers, and its linear time), `change_request_deviation_test.go`
@@ -5821,7 +5823,9 @@ work note, a legacy row, and a record whose contact has left the project under a
 recorded".
 
 **Legacy: a time stored before 0249** (`customer_proposed_for` NULL -- a proposal made before the deploy and still waiting, or a
-date the previous system wrote) has no record, and for it alone the rule that held until 0249 still holds: the proposer is **the
+date the previous system wrote; and also a time another writer, such as a manual fix or an import, stores later on a change that
+has had no proposal since it entered Customer Approval: entering it with no time stored leaves the column NULL, and so does a plain
+Re-schedule that voids an empty one) has no record, and for it alone the rule that held until 0249 still holds: the proposer is **the
 last writer of the change** (`work_item.updated_by`, read before the act's own write) when that writer is a registered PORTAL_USER
 contact of the project. So a migrated date reads "not recorded" exactly as before (its last writer is the sync's stamp or a WSO2
 user), and a pre-0249 proposal stays acceptable until somebody else writes to the change, which still makes it read "not

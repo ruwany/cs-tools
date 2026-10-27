@@ -88,12 +88,13 @@ import (
 // whether an Accept is allowed. (The notice drainer's only input is the outbox row, whose
 // snapshot carries this record itself; see crPlanDateActor in service/cr_notice_service.go.)
 //
-// LEGACY: a row whose customer_proposed_for is NULL holds a time stored before 0249 (a proposal
-// made then and still waiting, or a date the previous system wrote). For it, and only for it,
-// the proposer is still the LAST WRITER of the change (work_item.updated_by, read before the
-// act's own write), the rule that held until 0249: so a migrated date reads "not recorded"
-// exactly as before, and a pre-0249 proposal stays acceptable until somebody else writes to the
-// change.
+// LEGACY: a row whose customer_proposed_for is NULL holds a time stored with no record: before
+// 0249 (a proposal made then and still waiting, or a date the previous system wrote), or later by
+// another writer on a change that has had no proposal since it entered Customer Approval (the
+// void leaves the column NULL when no time is stored). For it, and only for it, the proposer is
+// still the LAST WRITER of the change (work_item.updated_by, read before the act's own write), the
+// rule that held until 0249: so a migrated date reads "not recorded" exactly as before, and a
+// pre-0249 proposal stays acceptable until somebody else writes to the change.
 //
 // A date that someone at WSO2 wrote in the previous system, one left over from an earlier
 // cycle, and one whose contact has left the project are alike "not recorded". Then no staff
@@ -462,10 +463,11 @@ func proposerFromRecord(ctx context.Context, q crQuerier, project *string, rec p
 }
 
 // proposerFromWriter is the LEGACY rule, for a row with no record (customer_proposed_for NULL:
-// a time stored before migration 0249): the last writer of the change is the proposer when they
-// are a REGISTERED PORTAL_USER contact of the change's project, and nobody otherwise. A blank
-// writer, a WSO2 user, a contact who has left, a contact of another project and the sync's own
-// stamp all name nobody. Only the writer's email is looked at.
+// a time stored before migration 0249, or by another writer while no record was kept): the last
+// writer of the change is the proposer when they are a REGISTERED PORTAL_USER contact of the
+// change's project, and nobody otherwise. A blank writer, a WSO2 user, a contact who has left, a
+// contact of another project and the sync's own stamp all name nobody. Only the writer's email is
+// looked at.
 func proposerFromWriter(ctx context.Context, q crQuerier, project *string, writer string) (proposer, error) {
 	email := strings.TrimSpace(writer)
 	if email == "" {
