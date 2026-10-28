@@ -114,11 +114,6 @@ function whoWhen(who?: string | null, when?: string | null): string {
   return who ?? whenText ?? "—";
 }
 
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
-
 /**
  * Detail + action dialog for a not-yet-published announcement request,
  * opened from the registry page's "Pending" tab. One dialog covers every
@@ -765,7 +760,7 @@ export default function AnnouncementRequestDialog({
                     submittingForApproval ||
                     hasUnsavedChanges ||
                     subject.trim().length === 0 ||
-                    isEmptyHtml(description) ||
+                    !hasVisibleContent(description) ||
                     !canCreateAnnouncement
                   }
                 >

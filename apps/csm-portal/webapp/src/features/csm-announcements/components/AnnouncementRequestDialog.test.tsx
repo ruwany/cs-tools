@@ -342,6 +342,25 @@ describe("AnnouncementRequestDialog — draft", () => {
     await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalledWith({ id: "req-1" }));
   });
 
+  it("submits a draft whose description is only an inline image", async () => {
+    mockGet({ state: "draft", description: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' });
+    const handleRunDryRun = vi.fn().mockResolvedValue({ caseId: "case-123", displayId: "WSO2-1" });
+    mockedDryRun.mockReturnValue({ runningDryRun: false, dryRunResult: null, canRunDryRun: true, handleRunDryRun });
+    const submitMutateAsync = vi.fn().mockResolvedValue({});
+    mockedSubmit.mockReturnValue({
+      ...(noopMutation() as object),
+      mutateAsync: submitMutateAsync,
+    } as unknown as ReturnType<typeof useSubmitAnnouncementRequest>);
+
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+    const submitBtn = screen.getByRole("button", { name: /submit for approval/i });
+    expect(submitBtn).toBeEnabled();
+    fireEvent.click(submitBtn);
+
+    expect(handleRunDryRun).toHaveBeenCalled();
+    await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalledWith({ id: "req-1" }));
+  });
+
   it("does not record or submit anything when the dry run itself fails", async () => {
     mockGet({ state: "draft" });
     const handleRunDryRun = vi.fn().mockResolvedValue(null);

@@ -42,6 +42,7 @@ import AudienceScopeControls, {
 import ResolvedAudienceList from "@features/csm-announcements/components/ResolvedAudienceList";
 import type { CustomerAudienceDefinition } from "@features/csm-announcements/types/announcementRequests";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { hasVisibleContent } from "@utils/sanitizeHtml";
 
 /**
  * The two default exclusions offered for the "all customer projects" scope,
@@ -63,11 +64,6 @@ const CLOSED_STATES: string[] = ["Restricted", "Suspended"];
  * vocabulary on the backend.
  */
 export const SECURITY_ANNOUNCEMENT_TAG_LABEL = "Security Announcement";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 const PENDING_TARGET = "/announcements?tab=pending";
 
@@ -164,7 +160,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
     [scope, projectIds, excludeClosedStates, excludeCloudTypes],
   );
 
-  const canSaveDraft = subject.trim().length > 0 && !isEmptyHtml(description) && !busy;
+  const canSaveDraft = subject.trim().length > 0 && hasVisibleContent(description) && !busy;
 
   const canSubmitForApproval =
     canRunDryRun &&

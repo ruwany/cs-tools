@@ -180,12 +180,15 @@ function selectProjects(...values: string[]): void {
   fireEvent.change(select);
 }
 
-function fillSubjectAndDescription(): void {
+/** A description that is only an inline image: no text, but content all the same. */
+const IMAGE_ONLY_DESCRIPTION = '<p><img src="data:image/png;base64,AAAA" alt=""></p>';
+
+function fillSubjectAndDescription(description = "<p>Maintenance window details.</p>"): void {
   fireEvent.change(screen.getByLabelText(/subject/i), {
     target: { value: "Scheduled maintenance" },
   });
   fireEvent.change(screen.getByLabelText("editor"), {
-    target: { value: "<p>Maintenance window details.</p>" },
+    target: { value: description },
   });
 }
 
@@ -332,6 +335,42 @@ describe("CsmAnnouncementCreatePage", () => {
     );
     expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/announcements?tab=pending", undefined));
+  });
+
+  it("saves a draft whose description is only an inline image", async () => {
+    renderPage();
+    fillSubjectAndDescription(IMAGE_ONLY_DESCRIPTION);
+
+    const saveDraft = screen.getByRole("button", { name: /save as draft/i });
+    expect(saveDraft).toBeEnabled();
+    fireEvent.click(saveDraft);
+
+    await waitFor(() =>
+      expect(createDraftMock.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "customer", description: IMAGE_ONLY_DESCRIPTION }),
+      ),
+    );
+  });
+
+  it("runs the dry run and submits for approval with a description that is only an inline image", async () => {
+    mockSuccessfulDryRun();
+    renderPage();
+    fillSubjectAndDescription(IMAGE_ONLY_DESCRIPTION);
+    selectProjects("proj-1");
+
+    const submit = screen.getByRole("button", { name: /submit for approval/i });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(postCaseMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "announcement", description: IMAGE_ONLY_DESCRIPTION }),
+      ),
+    );
+    await waitFor(() =>
+      expect(recordDryRunMock.mutateAsync).toHaveBeenCalledWith({ id: "draft-1", caseId: "case-test-1" }),
+    );
+    await waitFor(() => expect(submitMock.mutateAsync).toHaveBeenCalledWith({ id: "draft-1" }));
   });
 
   it("surfaces an error and does not navigate when Save as draft fails", async () => {
@@ -515,6 +554,24 @@ describe("CsmAnnouncementCreatePage", () => {
 
       fillSubjectAndDescription();
       await waitFor(() => expect(saveDraft).toBeEnabled());
+    });
+
+    it("saves an eol draft whose description is only an inline image", async () => {
+      mockEolBackend();
+      renderPage();
+      switchToEolKind();
+      await selectProductAndVersion();
+      fillSubjectAndDescription(IMAGE_ONLY_DESCRIPTION);
+
+      const saveDraft = screen.getByRole("button", { name: /save as draft/i });
+      await waitFor(() => expect(saveDraft).toBeEnabled());
+      fireEvent.click(saveDraft);
+
+      await waitFor(() =>
+        expect(createDraftMock.mutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "eol", description: IMAGE_ONLY_DESCRIPTION }),
+        ),
+      );
     });
 
     it("Submit for approval is disabled until the resolved audience is non-empty", async () => {
