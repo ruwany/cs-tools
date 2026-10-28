@@ -50,6 +50,14 @@ permission (see `apps/csm-portal/backend`'s own `CLAUDE.md`, "PATCH /projects/{i
 requires PermAdmin") — hiding the pencil icon for a `cs_engineer` just avoids offering an action that
 would 403 for them.
 
+**Skills** (`features/csm-skills`, `/skills`) has two more deliberate exceptions, both by explicit product
+decision and both on top of a real backend gate: the **Skill Manager** tab (`CsmSkillsPage.tsx`) is shown only
+when `useIsSkillManager` succeeds. That hook has no flag to read, so it calls `POST /skills/users/search` once
+with `{pagination:{limit:1}}`, caches the answer for the session and treats a `403` as "not a manager" (any other
+failure also hides the tab). And the All Skills tab's create/edit/(de)activate actions render only for
+`usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
+manager table are always sent to the backend, never done in the browser.
+
 **`AddUserDialog.tsx` only collects an email — there are no first/last name fields.** The backend
 (`apps/csm-portal/backend`'s own `CLAUDE.md`, "Creating a user") looks that email up in SCIM and fills
 `firstName`/`lastName`/phone from that record; a 400 from SCIM having no matching user (or a match with
@@ -98,6 +106,23 @@ and `POST /users` share the identical `PermAdmin` gate on the backend, and on th
 only ever renders inside `AddUserDialog`, which `CsmUsersPage.tsx`'s own `canCreateUser` check already
 keeps out of a non-admin's reach entirely (see the "Add User" exception at the top of this section) —
 no second, redundant permission check was added inside the dialog itself.
+
+**Granting a portal role to an already-existing user** (`UserProfilePage.tsx`'s "Grant role" button next
+to "CSM Platform roles", `GrantUserRoleDialog.tsx`) reuses `AddUserDialog.tsx`'s own "Portal roles"
+machinery (`useGetGrantableRoles`, `grantableRoleLabel`) against `POST /users/{id}/roles`
+(`usePostGrantUserRoles.ts`) instead of duplicating it — the backend's own `GrantableRole`/SCIM
+mechanism (see `apps/csm-portal/backend`'s `CLAUDE.md`) is shared between the two. Unlike `AddUserDialog`,
+this button is **shown unconditionally** rather than gated behind `usePortalAccess()` — the
+default "show the action, let the backend reject" norm from the top of this section, not a fourth
+deliberate hide-it exception: there's no reported reason yet to hide it from a non-admin the way
+`canCreateUser`/`canUpdateProjectClosureState` are. A role the target already holds
+(`user.csmPlatformRoles`) is rendered checked-and-disabled rather than left off the list, so an admin
+can see at a glance what's already granted instead of risking a duplicate grant. The backend reports
+per-role success (`granted`/`failed`, HTTP 200 or 207 — both resolve as an ordinary success response, the
+dialog reads the body to tell a partial failure from a full one), so a partial failure leaves the
+failed role(s) still checked for a quick retry rather than clearing the whole form. This section only
+ever renders for a wso2.com-email target (`showCsmPlatformRoles`) — same gating as "CSM Platform roles"
+itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role in the first place.
 
 ## Code organization
 

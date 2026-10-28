@@ -250,6 +250,40 @@ is really a deployment misconfiguration. `GetTimeCardApprovers` checks for those
 and reports a sanitized 502 instead; every other SCIM failure status still goes through the normal
 `mapUpstreamErrorGeneric` mapping.
 
+## Granting a portal role to an existing user (`POST /users/{id}/roles`)
+
+`grantRoles` above only ever fires at the moment a new platform user is created — there was no
+way to put an *existing* user into a portal role afterward without an admin doing it by hand,
+outside the portal. `UsersHandler.GrantUserRoles` (`internal/handler/users.go`) closes that gap:
+admin-only, same `PermAdmin` gate as `POST /users` and `GET /roles/grantable`, and reuses the
+identical `handler.GrantableRole`/`RoleIDForKey` resolution `CreateUser`'s own grant step uses —
+the request body is `{"roles": ["cs_engineer", ...]}`, the same portal role key vocabulary `GET
+/roles/grantable` reports.
+
+**Unlike `CreateUser`'s grant step, a SCIM failure here is not best-effort.** `CreateUser` can
+treat a failed grant as recoverable because the platform user it just created is the actual point
+of that call — granting a role is a bonus on top. Here, granting the role *is* the entire point of
+the call, so swallowing a SCIM failure as a logged warning (as `CreateUser` does) would return a
+200 to an admin who just watched nothing happen. Every requested role is still attempted
+independently — one bad/unreachable role never blocks the others — and the response reports
+exactly which roles were granted and which weren't (`grantUserRolesResponse{Granted, Failed}`):
+`200` when every role succeeded, `502` when none did, `207 Multi-Status` for a mixed result.
+
+**The target's email is resolved via `entity.GetUser(id)`, not taken from the caller.** SCIM's
+`AddRoleMembers` grants by email, not platform user id, so the handler looks the target up by the
+`{id}` path segment first (the same identity resolution `PATCH /users/{id}` already does) and uses
+whatever email entity-service's own `UserDetail.Email` returns — a caller cannot grant a role to an
+email of their own choosing that doesn't match the `{id}` they named.
+
+**Refused with a 400 when the target isn't a `@wso2.com` account** (`isWso2Email`,
+`internal/handler/user_external_account.go`) — a portal role only ever resolves back to anything on
+the read side for a wso2.com account (`withPortalRoles`' own identical gate), so granting one to any
+other target would silently add them to a SCIM role in the wrong org with no way for this portal to
+ever display or act on it again; a mistaken grant like that would have looked like it worked (a 200
+from SCIM) while doing nothing anyone could observe. `CreateUser`'s own `grantRoles` field got the
+identical guard at the same time, for the same reason — it had none before either, despite sharing
+the exact same `GrantableRole`/SCIM mechanism.
+
 ## Provisioning a "user" row on demand (`ensureUserProvisioned`)
 
 A `worknote_creator`- or `escalator`-only caller reaches `POST /cases/{id}/comments`
@@ -803,6 +837,7 @@ Follow these steps in order:
 - **Field naming**: case create/patch use bare names without `Key`/`Keys` suffix — `state`, `severity`, `workState`, `type`, `engagementType`, `catalogId`, `catalogItemId`, `variables` (PATCH — the latter four only meaningful transferring into `engagement`/`service_request` respectively), `type`, `severity`, `issueType` (POST); search filters use `states`, `severities`, `types`, `issueTypes`, `engagementTypes`; deployment search uses `deploymentTypes`; case comments use `type` (not `typeKey`); case create accepts `type: "case"`, `"service_request"`, or `"security_report_analysis"` (ServiceNow only for the latter two); case-type transfer via PATCH accepts `type: "case"`, `"engagement"`, `"security_report_analysis"`, or `"service_request"` (ServiceNow only)
 - **Deployment ID injection**: two helpers exist in `deployments.go` — `injectDeploymentID` (injects `deploymentIds: [id]` array, used by search) and `injectDeploymentIDField` (injects `deploymentId: id` string, used by create/update). Use the correct one for the endpoint's upstream contract.
 - **Upstream errors**: use `mapUpstreamErrorGeneric(w, err, "<fallback message>")` for every endpoint by default — never write custom status mappings inline. Only the ten PATCH/update handlers (`PatchCase`, `PatchCallRequest`, `PatchMe`, `UpdateProject`, `PatchDeployment`, `PatchDeployedProduct`, `PatchChangeRequest`, `UpdateTimeCard`, `UpdateTask`, `PatchIncident`), plus the customer-health lifecycle/mutation handlers (`OpenRisk`, `CloseRisk`, `MarkHealthy`, `RevertReview`, `CreateActionItem`, `UpdateActionItemStatus`, `UpdateActionItem`, `CreateActionItemComment` — `internal/handler/customer_health.go`/`customer_health_action_items.go`), use `mapUpstreamError` instead, which surfaces the upstream 400/409/422 reason (e.g. "Invalid state transition") — appropriate there because the request body just submitted is what's being rejected: entity-service's own lifecycle refusals on these endpoints (e.g. "action items can only be added to open risks", "resolutionComment is required when status is RESOLVED or CANCELLED") are caller-actionable, not internal detail to hide. Every other endpoint (search/create/get/delete) forwards a payload that's only partially validated at this layer, so a 4xx from upstream isn't reliably something the caller could have avoided; `mapUpstreamErrorGeneric` returns the fixed fallback message for those instead of echoing upstream detail. Both log the full reason via the caller's `slog.ErrorContext(ctx, ..., "err", err)` regardless of which is used.
+- **Skills handlers are a further documented exception** (`internal/handler/skills.go`, `writeSkillError`): on all twelve `/skills/...` routes a 400, 403, 404 or 409 from entity-service keeps its own `message` (and `errorCode` when named). Those texts are written by entity-service's skills module for the caller (e.g. "level is not part of this skill's scale", "skill is already on your profile", "duplicate skill name") and are the only way a user can tell why an add or edit was refused; they carry no internal detail. 5xx and every other status still go through `mapUpstreamErrorGeneric`.
 - **`GetMe` maps an upstream 404 to 403, not 404 — unless the caller's token already grants a portal role.** A 404 here means the caller's own authenticated identity has no backing user row — not a missing resource the caller asked for by ID — and the webapp's data-fetching hook for this endpoint has no handling for a bare 404, so it spun forever instead of showing anything. Since "you don't have permission" is already a handled UI state, `GetMe` treats this upstream 404 as 403 by default, while still logging the real cause at `ERROR` (without the caller's email, to stay off the PII list above). But a caller can hold a real `AUTH_<ROLE>_ROLES` grant via their token with no entity-service `"user"` row yet to show for it (the same provisioning gap `ensureUserProvisioned` exists for, just not yet hit for this caller) — 403ing them outright would lock out someone the access policy already decided should be in. So when `resp.Roles` (computed from the token before the entity-service call) is non-empty, `GetMe` answers 200 instead, built entirely from the token: `email`/`firstName`/`lastName`/`roles` (SCIM phone lookup still runs, best-effort as usual), with `id`/`timeZone`/`team` left `null` since those only ever come from the entity-service row that doesn't exist. Both `id` and `team` are `json:"id"`/`json:"team"` (no `omitempty`) specifically so this null is visible on the wire rather than silently absent. Follow this same substitution if another identity-bound "fetch my own X" endpoint hits the same failure mode.
 - **Response**: return raw `[]byte` with `writeJSON` for simple passthroughs; unmarshal into typed structs only when the response shape needs to change
 

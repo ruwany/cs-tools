@@ -99,6 +99,7 @@ import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
 import CsmAccountDetailPage from "@features/csm-accounts/pages/CsmAccountDetailPage";
 import CsmProjectsPage from "@features/csm-projects/pages/CsmProjectsPage";
 import CsmTeamSchedulePage from "@features/csm-team-schedule/pages/CsmTeamSchedulePage";
+import CsmSkillsPage from "@features/csm-skills/pages/CsmSkillsPage";
 import CsmProjectDetailPage from "@features/csm-projects/pages/CsmProjectDetailPage";
 import ConversationDetailPage from "@features/csm-projects/pages/ConversationDetailPage";
 import CsmUpdatesPage from "@features/updates/pages/CsmUpdatesPage";
@@ -107,6 +108,8 @@ import CreateSecurityReportPage from "@features/csm-security-center/pages/Create
 import ProductVulnerabilityDetailPage from "@features/csm-security-center/pages/ProductVulnerabilityDetailPage";
 import CsmEngagementsPage from "@features/csm-engagements/pages/CsmEngagementsPage";
 import CsmEngagementCreatePage from "@features/csm-engagements/pages/CsmEngagementCreatePage";
+import CsmAllocationsPage from "@features/csm-allocations/pages/CsmAllocationsPage";
+import CsmAllocationDetailPage from "@features/csm-allocations/pages/CsmAllocationDetailPage";
 import CsmTimeCardsPage from "@features/csm-timecards/pages/CsmTimeCardsPage";
 import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncementsPage";
 import CsmAnnouncementCreatePage from "@features/csm-announcements/pages/CsmAnnouncementCreatePage";
@@ -322,6 +325,7 @@ export default function App(): JSX.Element {
                     <Route path="projects" element={<CsmProjectsPage />} />
                   </Route>
                   <Route path="team-schedule" element={<CsmTeamSchedulePage />} />
+                  <Route path="skills" element={<CsmSkillsPage />} />
                   <Route
                     path="customers/accounts/:id"
                     element={<CsmAccountDetailPage />}
@@ -589,6 +593,11 @@ export default function App(): JSX.Element {
                   <Route
                     path="engagements/:caseId"
                     element={<CaseDetailRouteSync kind="engagement" />}
+                  />
+                  <Route path="allocations" element={<CsmAllocationsPage />} />
+                  <Route
+                    path="allocations/:allocationId"
+                    element={<CsmAllocationDetailPage />}
                   />
                   <Route path="updates" element={<CsmUpdatesPage />} />
                   {/* Security Center's own Security reports / Vulnerabilities

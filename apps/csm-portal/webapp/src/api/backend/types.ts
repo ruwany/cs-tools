@@ -1806,6 +1806,20 @@ export interface BeGrantableRolesResponse {
   roles: BeGrantableRole[];
 }
 
+/** `POST /users/{id}/roles` request body — grant one or more portal role keys
+ * (see `GET /roles/grantable`) to an already-existing user via SCIM. */
+export interface BeGrantUserRolesPayload {
+  roles: string[];
+}
+
+/** `POST /users/{id}/roles` response. `granted` is always present (an empty
+ * array, never `null`, on total failure); `failed` is omitted entirely on
+ * full success rather than sent as an empty array. */
+export interface BeGrantUserRolesResponse {
+  granted: string[];
+  failed?: string[];
+}
+
 export interface BeUserSearchFilters {
   /** Case-insensitive match against username and email. */
   searchQuery?: string;
@@ -2110,6 +2124,26 @@ export interface BeDeployment {
   createdBy?: string;
   createdOn?: string;
   updatedOn?: string;
+  /**
+   * Whether the deployment's products cannot reach WSO2, so its licences tell
+   * them not to publish usage online. `null` when the entity service runs on
+   * ServiceNow, which has no such field (and no way to set it).
+   */
+  airGapped?: boolean | null;
+}
+
+/** Body of `PUT /deployments/{id}/air-gapped`. */
+export interface BeDeploymentAirGappedPayload {
+  airGapped: boolean;
+}
+
+/** Response of `PUT /deployments/{id}/air-gapped`. */
+export interface BeDeploymentAirGappedResponse {
+  id: string;
+  number?: string | null;
+  airGapped: boolean;
+  updatedOn: string;
+  updatedBy: string;
 }
 
 /**
@@ -4048,21 +4082,15 @@ export interface BeProblemFieldFilter {
 export interface BeProblemSearchFilters {
   searchQuery?: string;
   /**
-   * Filter by state. Not confirmed live against the backend at the time this
-   * was written, so if the backend rejects or silently ignores this filter,
-   * drop it here and from `ProblemsTab`'s payload, and remove the state
-   * control from `ProblemsFilterBar`.
-   */
-  states?: BeProblemState[];
-  /**
    * A single problem number (e.g. "PRB0040192"); matches exactly. Routed as
    * a first-class filter rather than through the free-text searchQuery scan.
    */
   number?: string;
   /**
-   * The generic field/op/values filter array (see {@link BeProblemFieldFilter}) —
-   * additive alongside `states` above. Only the SRE Team control
-   * (`assignmentGroupId`/`"in"`) populates this today.
+   * The generic field/op/values filter array (see {@link BeProblemFieldFilter}).
+   * The only way to filter by state (`state`/`"in"`) or SRE team
+   * (`assignmentGroupId`/`"in"`); the search body has no named `states`
+   * field and the backend rejects unknown fields.
    */
   filters?: BeProblemFieldFilter[];
 }

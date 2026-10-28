@@ -1858,6 +1858,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /users/{id}/roles:
+    post:
+      summary: Grant one or more portal permission roles to an existing user.
+      description: >
+        Admin-only. The post-creation counterpart to POST /users' own grantRoles
+        field — grants a portal permission role (see GET /roles/grantable for the
+        exact set this deployment can grant) to a user who already exists via
+        SCIM, rather than only at the moment a new one is created. Every
+        requested role is attempted even if an earlier one fails to grant, so
+        one bad role never blocks the rest; the response reports exactly which
+        roles were granted and which were not.
+      operationId: grantUserRoles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantUserRolesPayload'
+      responses:
+        "200":
+          description: Every requested role was granted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUserRolesResponse'
+        "207":
+          description: Some, but not all, requested roles were granted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUserRolesResponse'
+        "400":
+          description: Bad request (malformed id, empty roles, or an unknown role key).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: None of the requested roles could be granted (a SCIM failure).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUserRolesResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /roles/search:
     post:
       summary: Search the role catalogue.
@@ -4582,6 +4657,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeploymentUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /deployments/{id}/air-gapped:
+    put:
+      summary: Mark a deployment air-gapped, or clear the mark.
+      description: |
+        An air-gapped deployment's products cannot reach WSO2: the licences issued for it
+        tell its products not to publish usage online, and its usage arrives as uploaded
+        reports instead. Requires write access (cs_engineer or admin). Only `airGapped` is
+        forwarded to the entity service; any other field is ignored. The entity service
+        stores this in Postgres only, so it returns 404 when it runs on ServiceNow.
+      operationId: putDeploymentAirGapped
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the deployment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentAirGappedPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentAirGappedResponse'
         "400":
           description: BadRequest
           content:
@@ -14677,7 +14820,7 @@ paths:
                   minItems: 1
                   maxItems: 500
                   items: { type: string, format: uuid }
-                from: { type: string, format: date, description: First day of the window, inclusive. }
+                from: { type: string, format: date, description: "First day of the window, inclusive." }
                 to: { type: string, format: date, description: "Last day of the window, inclusive; at most 70 days after `from`." }
       responses:
         "200":
@@ -14706,6 +14849,213 @@ paths:
                         modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
                         utilization: { type: number }
                   count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagement-allocations/search:
+    post:
+      summary: Search customer engagement allocations.
+      operationId: searchEngagementAllocations
+      description: >
+        One page of customer engagement allocations with their engagement,
+        account and engineer, filtered, sorted (default newest `startDate`
+        first) and counted. Internal staff only. The body is validated by the
+        entity service and forwarded unchanged; the response is returned as
+        sent. `limit` defaults to 20, at most 50.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchEngagementAllocationsRequest'
+      responses:
+        "200":
+          description: One page of allocations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchEngagementAllocationsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagement-allocations/{id}:
+    get:
+      summary: One customer engagement allocation.
+      operationId: getEngagementAllocation
+      description: Internal staff only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagement-allocations/{id}/updates:
+    get:
+      summary: The status updates written against an allocation, newest first.
+      operationId: listEngagementAllocationUpdates
+      description: "Internal staff only. `limit` defaults to 20, at most 50."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: One page of updates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEngagementAllocationUpdatesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Post a status update on an allocation.
+      operationId: createEngagementAllocationUpdate
+      description: >
+        Only the engineer the allocation is for may post; the entity service
+        decides that from the caller's identity and the portal does not check
+        it. A 403 or 400 carries the entity service's own reason in `message`.
+        `subject` is required, at most 512 characters; `content` is required,
+        at most 8000.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEngagementAllocationUpdateRequest'
+      responses:
+        "201":
+          description: The stored update.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationUpdate'
         "400":
           description: Bad request.
           content:
@@ -16344,6 +16694,631 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /skills/levels:
+    get:
+      summary: The skill level scales and their levels.
+      operationId: getSkillLevels
+      description: >
+        Every level scale with its levels in value order. A skill is rated on one scale and a person may
+        only hold a level of that skill's scale. Forwarded from the entity service unchanged.
+      responses:
+        "200":
+          description: The scales.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillLevelTypesResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/categories:
+    get:
+      summary: The skill category tree, flat.
+      operationId: getSkillCategories
+      description: >
+        Every category with its parent, so a client can build the tree. Skills are filed under lowest-level categories.
+      responses:
+        "200":
+          description: The categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategoriesResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/search:
+    post:
+      summary: Search the skill catalogue.
+      operationId: searchSkills
+      description: >
+        The read-only catalogue (All Skills), paged and filtered by the entity service. Inactive skills are
+        left out unless `includeInactive` is true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillsRequest'
+      responses:
+        "200":
+          description: A page of skills.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSkillsResponse'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills:
+    post:
+      summary: Create a skill.
+      operationId: createSkill
+      description: >
+        Requires the write permission here; the entity service then allows only a portal admin and refuses
+        anyone else with 403. A skill needs a level scale and may be filed under categories.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequest'
+      responses:
+        "201":
+          description: The new skill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/{id}:
+    get:
+      summary: Read one skill.
+      operationId: getSkill
+      description: >
+        One skill with its categories.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The skill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit or deactivate a skill.
+      operationId: updateSkill
+      description: >
+        Requires the write permission here; the entity service then allows only a portal admin. Fields left
+        out are unchanged. `categoryIds` replaces the category links as a whole. `active: false` deactivates.
+        Changing the level scale is refused with 409 while anybody holds a level of the skill.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillRequest'
+      responses:
+        "200":
+          description: The skill as it now stands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/me:
+    get:
+      summary: The caller's own skills profile.
+      operationId: getMySkills
+      description: >
+        The active skills of the caller's own user, resolved by the entity service from the token and never
+        from the request.
+      responses:
+        "200":
+          description: The caller's skills.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MySkillsResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a skill to the caller's profile.
+      operationId: addMySkill
+      description: >
+        Adds the skill at the given level. The level must belong to the skill's scale (400). The skill must
+        be active and not already on the profile (409).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMySkillRequest'
+      responses:
+        "201":
+          description: The profile entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/me/history:
+    get:
+      summary: The caller's skill level history.
+      operationId: getMySkillHistory
+      description: >
+        Level changes on the caller's own profile. `limit` and `offset` are validated by the
+        entity service.
+      parameters:
+        - name: skillId
+          in: query
+          required: false
+          description: Only this skill.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: A page of history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillHistoryResponse'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/me/{skillId}:
+    put:
+      summary: Change the level of a skill on the caller's profile.
+      operationId: setMySkillLevel
+      description: >
+        The level must belong to the skill's scale (400). A row inherited from a group cannot be changed (409).
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMySkillLevelRequest'
+      responses:
+        "200":
+          description: The profile entry as it now stands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Remove a skill from the caller's profile.
+      operationId: removeMySkill
+      description: >
+        A row inherited from a group cannot be removed (409).
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/users/search:
+    post:
+      summary: Everybody's skills (Skill Manager).
+      operationId: searchUserSkills
+      description: >
+        Requires the view permission here; the entity service allows only a skill manager and refuses anyone
+        else with 403. Paged and filtered by the entity service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchUserSkillsRequest'
+      responses:
+        "200":
+          description: A page of person-skill rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchUserSkillsResponse'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -16557,6 +17532,118 @@ components:
           type: string
           nullable: true
           enum: [T1, T2, T3, null]
+    SearchEngagementAllocationsRequest:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            limit: { type: integer, description: Defaults to 20; at most 50. }
+            offset: { type: integer }
+        filters:
+          type: object
+          properties:
+            searchQuery: { type: string, description: "Matches the allocation reference, engagement name and engagement display id." }
+            accountId: { type: string, format: uuid }
+            accountName: { type: string, description: Substring match. }
+            engineerId: { type: string, format: uuid, description: Platform user id of the allocated engineer. }
+            engagementId: { type: string, format: uuid }
+            states:
+              type: array
+              items: { type: string, description: An allocation state such as CONFIRMED. }
+            from: { type: string, format: date, description: Keep allocations ending on or after this date. }
+            to: { type: string, format: date, description: Keep allocations starting on or before this date. }
+        sortBy:
+          type: object
+          properties:
+            field: { type: string, enum: [startDate, endDate, state, allocationId, accountName, engineerName, utilization] }
+            order: { type: string, enum: [asc, desc] }
+    EngagementAllocationPerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+    EngagementAllocationView:
+      type: object
+      required: [id, engagement]
+      properties:
+        id: { type: string, format: uuid }
+        allocationId: { type: string, description: Human-readable reference. }
+        state: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        startTime: { type: string, description: "Wall-clock time in `timezone`, e.g. 09:00:00." }
+        endTime: { type: string }
+        timezone: { type: string }
+        utilization: { type: number }
+        engagement:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+            displayId: { type: string }
+            name: { type: string }
+            type: { type: string }
+            modeOfDelivery: { type: string }
+            state: { type: string }
+            businessUnit: { type: string }
+            isPaid: { type: boolean }
+            projectId: { type: string, format: uuid }
+            plannedStartDate: { type: string, format: date }
+            plannedEndDate: { type: string, format: date }
+            actualStartDate: { type: string, format: date }
+            actualEndDate: { type: string, format: date }
+        account:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        engineer: { $ref: '#/components/schemas/EngagementAllocationPerson' }
+        latestUpdateDate: { type: string, format: date-time }
+    SearchEngagementAllocationsResponse:
+      type: object
+      required: [allocations, total, limit, offset, hasMore]
+      properties:
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/EngagementAllocationView' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+    EngagementAllocationUpdate:
+      type: object
+      required: [id, createdOn]
+      properties:
+        id: { type: string, format: uuid }
+        subject: { type: string }
+        content: { type: string }
+        state: { type: string, enum: [DRAFT, PUBLISHED, CANCELLED] }
+        visibility: { type: string, enum: [INTERNAL, CUSTOMER] }
+        cycleStartDate: { type: string, format: date }
+        publishedDate: { type: string, format: date-time }
+        createdOn: { type: string, format: date-time }
+        author: { $ref: '#/components/schemas/EngagementAllocationPerson' }
+    ListEngagementAllocationUpdatesResponse:
+      type: object
+      required: [updates, total, limit, offset, hasMore]
+      properties:
+        updates:
+          type: array
+          items: { $ref: '#/components/schemas/EngagementAllocationUpdate' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+    CreateEngagementAllocationUpdateRequest:
+      type: object
+      required: [subject, content]
+      properties:
+        subject: { type: string, maxLength: 512 }
+        content: { type: string, maxLength: 8000 }
     ErrorPayload:
       type: object
       description: >-
@@ -19781,6 +20868,38 @@ components:
             A stable portal role key (e.g. "cs_engineer", "escalator") — pass this
             value, not a display name, in CreateUserPayload.grantRoles.
 
+    GrantUserRolesPayload:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: >-
+            Portal role keys to grant via SCIM to the user named in the path —
+            see GET /roles/grantable for the exact set this deployment can
+            grant. At least one is required; an unknown key is a 400.
+
+    GrantUserRolesResponse:
+      type: object
+      required: [granted]
+      properties:
+        granted:
+          type: array
+          items:
+            type: string
+          description: Portal role keys that were successfully granted.
+        failed:
+          type: array
+          items:
+            type: string
+          description: >-
+            Portal role keys that were requested but could not be granted (a
+            SCIM failure). Omitted entirely when every requested role was
+            granted.
+
     CreateUserPayload:
       type: object
       required: [email]
@@ -20867,6 +21986,35 @@ components:
         updatedOn:
           type: string
           format: date-time
+        airGapped:
+          type: boolean
+          nullable: true
+          description: Whether the deployment's products cannot reach WSO2. Null when the entity service runs on ServiceNow, which has no such field.
+
+    DeploymentAirGappedPayload:
+      type: object
+      required: [airGapped]
+      properties:
+        airGapped:
+          type: boolean
+
+    DeploymentAirGappedResponse:
+      type: object
+      required: [id, airGapped, updatedOn, updatedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          nullable: true
+        airGapped:
+          type: boolean
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
 
     ProductSearchPayload:
       type: object
@@ -24890,6 +26038,30 @@ components:
                 A single problem number (e.g. "PRB0010001"); matches exactly.
                 Routed as a first-class filter rather than through the
                 free-text searchQuery scan.
+            filters:
+              type: array
+              description: >-
+                Generic field/op/values predicates, combined with AND. Unknown
+                request fields (for example a top-level `states`) are rejected
+                with 400.
+              items:
+                type: object
+                required: [field, op, values]
+                properties:
+                  field:
+                    type: string
+                    enum: [state, assignmentGroupId]
+                    description: >-
+                      `state` takes problem state values (NEW, ASSESS,
+                      ROOT_CAUSE_ANALYSIS, FIX_IN_PROGRESS, RESOLVED, CLOSED);
+                      `assignmentGroupId` takes group UUIDs.
+                  op:
+                    type: string
+                    enum: [in]
+                  values:
+                    type: array
+                    items:
+                      type: string
         pagination:
           allOf:
             - $ref: '#/components/schemas/Pagination'
@@ -27673,3 +28845,228 @@ components:
           items:
             $ref: '#/components/schemas/ScanResult'
 
+    SkillLevel:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        value: {type: integer, nullable: true, description: "Orders the levels of a scale (for example 20, 50, 100)."}
+        description: {type: string, nullable: true}
+        color: {type: string, nullable: true}
+    SkillLevelType:
+      type: object
+      required: [id, name, levels]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        levels:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevel'}
+    SkillLevelTypesResponse:
+      type: object
+      required: [levelTypes]
+      properties:
+        levelTypes:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevelType'}
+    SkillCategory:
+      type: object
+      required: [id, name, isLowestCategory]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        code: {type: string, nullable: true}
+        categoryPath: {type: string, nullable: true}
+        isLowestCategory: {type: boolean}
+        parentId: {type: string, format: uuid, nullable: true}
+    SkillCategoriesResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategory'}
+    SkillCategoryRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        categoryPath: {type: string, nullable: true}
+    Skill:
+      type: object
+      required: [id, name, active, categories, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        keywords: {type: string, nullable: true}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    SearchSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the name or keywords, ignoring case."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Skills filed under any of these categories or their descendants.
+        levelTypeId: {type: string, format: uuid}
+        includeInactive: {type: boolean, description: "Include deactivated skills. Default false."}
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    SkillPagination:
+      type: object
+      properties:
+        limit: {type: integer, description: "Page size. Defaults to the endpoint's default; above its maximum is a 400."}
+        offset: {type: integer, description: "Zero-based offset."}
+    SearchSkillsResponse:
+      type: object
+      required: [skills, total, limit, offset]
+      properties:
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/Skill'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    CreateSkillRequest:
+      type: object
+      required: [name, levelTypeId]
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, nullable: true, maxLength: 4000}
+        keywords: {type: string, nullable: true, maxLength: 500}
+        levelTypeId: {type: string, format: uuid}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+        active: {type: boolean, description: "Defaults to true."}
+    UpdateSkillRequest:
+      type: object
+      description: Fields left out are unchanged. At least one is required.
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, maxLength: 4000, description: "An empty string clears it."}
+        keywords: {type: string, maxLength: 500, description: "An empty string clears it."}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, description: "Refused (409) while anybody holds a level of the skill."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Replaces the category links as a whole; an empty list removes them all.
+    UserSkill:
+      type: object
+      required: [skillId, skillName, skillActive, categories, inherited, updatedOn]
+      properties:
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        skillActive: {type: boolean}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean, description: "True when the row comes from a group; the person cannot change it."}
+        inheritedFromGroupId: {type: string, format: uuid, nullable: true}
+        updatedOn: {type: string, format: date-time}
+    MySkillsResponse:
+      type: object
+      required: [userId, skills]
+      properties:
+        userId: {type: string, format: uuid, description: "The caller's own user id."}
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkill'}
+    AddMySkillRequest:
+      type: object
+      required: [skillId, levelId]
+      properties:
+        skillId: {type: string, format: uuid}
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SetMySkillLevelRequest:
+      type: object
+      required: [levelId]
+      properties:
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SkillHistoryEntry:
+      type: object
+      required: [id, skillId, skillName, changedOn]
+      properties:
+        id: {type: string, format: uuid}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        levelFrom:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null the first time the skill was set.
+        levelTo:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null when the skill was removed.
+        changedBy: {type: string, nullable: true, description: "Who made the change."}
+        changedOn: {type: string, format: date-time}
+    SkillHistoryResponse:
+      type: object
+      required: [history, total, limit, offset]
+      properties:
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/SkillHistoryEntry'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    SearchUserSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the person's name or email, ignoring case."}
+        userIds:
+          type: array
+          items: {type: string, format: uuid}
+        skillIds:
+          type: array
+          items: {type: string, format: uuid}
+        levelIds:
+          type: array
+          items: {type: string, format: uuid}
+        minLevelValue: {type: integer, nullable: true, description: "Rows whose level value is at least this."}
+        teamKeys:
+          type: array
+          items: {type: string}
+          description: People on any of these teams (registry keys).
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    UserSkillRow:
+      type: object
+      required: [userId, teamKeys, skillId, skillName, inherited, updatedOn]
+      properties:
+        userId: {type: string, format: uuid}
+        userName: {type: string, nullable: true}
+        userEmail: {type: string, nullable: true}
+        teamKeys:
+          type: array
+          items: {type: string}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean}
+        updatedOn: {type: string, format: date-time}
+    SearchUserSkillsResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkillRow'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}

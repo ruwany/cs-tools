@@ -74,6 +74,12 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED` | no | `false` | Must be `"true"` for the partner-link refresh (`account_relationship` "Is Partner Of" / "Is Customer Of") to run after Account events and partner-contact membership events, and for `POST /salesforce/accounts/{sfId}/refresh-partners` to be registered (see "Salesforce partner relationships" below). Keep it off while csm-sync-service still copies `account_relationship` from ServiceNow |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
+| `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
+| `SALESFORCE_WRITE_EVENT_HUB_TOPIC` | no | `salesforce-writes` | Topic the deferred-write **commands** are published to, consumed by sales-entity-service (digiops-sales, `membershipwrite`). The Event Hub must exist or every deferred invitation's publish fails (recorded in `event_publish_failures`, the request stays unpublished) |
+| `SALESFORCE_WRITE_RESULTS_TOPIC` / `SALESFORCE_WRITE_RESULTS_DLQ_TOPIC` | no | `salesforce-write-results` / `…-dlq` | Topics sales-entity-service **answers** on (`salesforce.membership_write.completed` / `.failed`) and this service's dead-letter copy of them. Both must exist |
+| `SALESFORCE_WRITE_RESULTS_CONSUMER_GROUP` / `…_DLQ_CONSUMER_GROUP` | no | `entity-service-salesforce-write-results` / `…-dlq` | This service's consumer groups on the two results topics. Never shared with another component |
+| `SALESFORCE_WRITE_RESULTS_RETRY_ATTEMPTS` / `…_RETRY_DELAY` | no | `3` / `2s` | Main results tier: attempts and fixed pause, then dead-letter. A result's handling waits on Sales Entity's REST reads and this database only; the **Salesforce** retry policy lives in sales-entity-service |
+| `SALESFORCE_WRITE_RESULTS_DLQ_RETRY_ATTEMPTS` / `…_DLQ_RETRY_DELAY` / `…_DLQ_RETRY_MAX_DELAY` | no | `10` / `30s` / `15m` | Dead-letter results tier: exponential, capped. On its last attempt the request is marked FAILED naming the Salesforce ids it could not stamp (the Salesforce echo still stamps them) |
 | `CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED` | no | `false` | Registers `POST /customer-engagements/allocation-events` (Postgres-authoritative only); see "Allocation events" below |
 | `CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID` | no | — | ServiceNow sys_id written as `engagement_type_id` on firefighting engagements created by allocation events. Unset skips creating them |
 | `REDIS_URL` | no | — | `rediss://:<key>@<host>:<port>` (TLS, Azure Managed Redis); wins over `REDIS_ADDR`. Turns on the user cache (see "User cache (Redis)" below). `Validate` requires a `redis`/`rediss` scheme and a host, and never echoes the URL |
@@ -1893,6 +1899,91 @@ sent. A label Salesforce would reject is a **400 naming it**, not an
 record Salesforce already holds (refusing would strip a real membership over a
 vocabulary gap), and wrong to tolerate one a caller is asking us to write.
 
+### Deferred Salesforce writes (`project_membership_deferred_write.go`)
+
+The ordering above makes every invitation fail with 503 while
+sales/sales-entity-service (or Salesforce behind it) is down, and a customer
+admin can do nothing about that. With `SALESFORCE_DEFERRED_WRITES_ENABLED=true`
+a **first invitation** survives the outage; everything else keeps failing fast.
+The Salesforce half then runs in **sales-entity-service** (digiops-sales,
+`membershipwrite` package), the service that owns the Salesforce connection;
+this service keeps the decision, the ledger and both CSM transactions.
+
+1. `Invite` tries Salesforce synchronously as always. Only when the validator
+   or the write fails with `ServiceUnavailableError` (connection error,
+   timeout, 5xx, an answer with no id) **and** the project has no membership
+   for the address yet does it fall through. A validation refusal, a conflict,
+   or a re-invitation of a DEACTIVATED row (which already has Salesforce ids
+   and would be an UPDATE there) is never deferred.
+2. The rows commit with NULL `sf_id` columns (`"user"`, `account_contact`,
+   `project_contact`; the repository never matches or stamps a blank id, and
+   records **no** DATABASE onboarding step, because the ledger is keyed by
+   the membership id) plus a `salesforce_write_request` row (migration 0249:
+   the admin's request as JSON `intent`, status PENDING) in the same
+   transaction. Then `salesforce.membership_write.requested` is published to
+   `SALESFORCE_WRITE_EVENT_HUB_TOPIC`, keyed by the request id, **carrying the
+   whole intent and the project's and account's Salesforce ids** (Sales Entity
+   cannot read this database), and `published_on` is stamped. The caller gets
+   **201** with `salesforceSync: "PENDING"` and empty ids.
+3. sales-entity-service consumes the command on two tiers (its own
+   `SALESFORCE_WRITES_*RETRY*` policies: short fixed, then a dead-letter topic
+   with exponential backoff), performs the write **search-first** (contact by
+   address, membership by project and contact; create on a miss, PATCH state
+   and roles otherwise) so a redelivery adopts rather than duplicates, and
+   publishes `salesforce.membership_write.completed` (both ids, the stored
+   state and roles) or `.failed` (`terminal: true` for a Salesforce refusal,
+   `false` when its retries ran out) to `SALESFORCE_WRITE_RESULTS_TOPIC`.
+   Before writing it runs the invitation checks the validator could not run
+   during the outage, from the command's `allowedAccountSfIds` (the project's
+   account and its partners, read here at deferral time) and `inviterEmail`:
+   at most one contact per address, the inviter on an allowed account, no
+   take-over of another account's live membership, the address's domain in
+   the base account's or a partner's domain list, and adoption of an existing
+   contact only from an allowed account. A refusal is a terminal `.failed`.
+4. `startSalesforceWriteResultConsumers` (`internal/server/salesforce_write_consumer.go`)
+   consumes the results. `CompleteDeferredSalesforceWrite` re-reads the
+   request (settled → acknowledge; this is what makes a duplicate result
+   harmless), reads the records back through Sales Entity's REST API
+   (`GetProjectContact`, `GetContact`) and maps them with the ingest's
+   `buildMembershipUpsert`, then in **one transaction** upserts the rows with
+   the ids, records the DATABASE step and marks the request SUCCEEDED, and
+   only then publishes `project_contact.invited`. The invitation email and the
+   identity provisioning therefore wait for the Salesforce id; nothing else
+   publishes that event for a deferred row (the Salesforce echo stays silent
+   because the row is already INVITED). `FailDeferredSalesforceWrite` marks
+   the request **FAILED** with Sales Entity's reason.
+5. A result whose handling cannot finish (Sales Entity REST or the database
+   unavailable) is retried per the results policies; on the dead-letter
+   tier's last call the request is marked FAILED naming the Salesforce ids it
+   could not stamp, so it never sits PENDING with nothing behind it. A
+   terminal problem (the row is gone, the records do not add up) is FAILED at
+   once.
+6. While a request is PENDING, `UpdateRoles`, `Deactivate` and
+   `ResendInvitation` answer **409** with code `salesforce_sync_pending`
+   ("still being synced to Salesforce"). Once it is FAILED, or was never
+   published, `UpdateRoles` and `ResendInvitation` answer **409**
+   `salesforce_sync_failed` and `Deactivate` runs **locally** (no Salesforce
+   half to undo), closing the request as CANCELLED so nothing picks it up. A
+   row with no id and no request keeps the generic missing-id refusal.
+   `salesforce_write_request.retryable` tells a FAILED row's two causes apart
+   (retries exhausted vs. refused). A PENDING request that was never
+   published (the command publish failed) reads as FAILED everywhere -- the
+   contact lists, the refusals and the local removal -- since nothing will
+   consume it without a re-publish. The contact reads
+   (`POST /projects/{id}/contacts/search`, `GET …/{contactId}`) carry
+   `salesforceSync: PENDING | FAILED` from the latest request row, read
+   best-effort through `WithProjectContactSalesforceSync`.
+
+What the event path does **not** cover: a command or result that is never
+delivered (the row stays PENDING, `published_on` says whether the command
+left at all), and an outage that outlives Sales Entity's retries (the row
+says FAILED). Both need a re-publish — a sweep or a manual retry — which is
+deliberately not part of this change. `membership_registration_service.go`
+already skips rows with a blank `sf_id`, so a person who signs in before the
+sync lands is registered on a later login. The local stack exercises the
+whole loop with `scripts/csm-compose/sf-deferred-e2e.sh` and a mock
+sales-entity-service that plays the consumer.
+
 ### The Sales Entity write client (`internal/salesentity/membership_writes.go`)
 
 `SearchContactByEmail` (`POST /contacts/search {email}`), `CreateContact`
@@ -3655,6 +3746,151 @@ has neither column, so a hold on one is a 400, never a silent no-op.
   `snCaseService` mirror) against a fake ServiceNow server and asserts the PATCH
   it receives: the case's sysid, only `autocloseHoldUntil` as a date, the caller's
   token forwarded.
+
+## Case auto-closure (reminders and automatic closure)
+
+Tickets that sit in **Awaiting Info** or **Solution Proposed** with no activity are reminded twice and
+then closed. This is native to this service (Postgres only): nothing in it reads or writes ServiceNow,
+and it replaces ServiceNow's "Auto Close Resolved Cases" flow rather than mirroring it. It is switched on by the scheduler (`AUTOCLOSURE_ENABLED`); `AUTOCLOSURE_SYSTEM_USER_EMAIL` is **optional**. It needs a Postgres data source (`postgres` or `postgres-servicenow-dual-write`, where the case writes are mirrored to ServiceNow like any other). The two routes are always registered; where the feature cannot run (`DATA_SOURCE=servicenow`) they answer an explicit `503` naming the reason, so an enabled scheduler fails with that sentence in its alert instead of a bare 404. See "Dual-write rollout" below. It is driven
+by `operations/csm-scheduled-tasks`'s `case_autoclosure` task (see that component's CLAUDE.md).
+
+| Env var | Meaning |
+|---|---|
+| `AUTOCLOSURE_SYSTEM_USER_EMAIL` | Optional. The `"user"` row (type `SYSTEM`) the reminder and closure comments are written as and `closed_by` is stamped with. **Empty (the normal case): the workflow acts as the system itself, shown as "System user"**: comments are authored "System user", the activity entry and the Pending Verification card's "Added by" say "System user", and `closed_by_user_id` stays empty (no user row exists to point at) |
+
+**Who is eligible** (one SQL predicate, `autoclosureBaseCTE` + `autoclosureNoOpenChild` in
+`autoclosure_repo.go`, used by both the listing and the per-ticket re-check): a `"case"` (Query and
+Incident are both a `"case"`) or a `security_report_analysis` in `AWAITING_INFO` / `SOLUTION_PROPOSED`,
+with `autoclose_enabled` (migration 0249, default true), **no parent** (a child never has a workflow of
+its own), and **no open child** (case-like children not closed; change-request children not
+closed/canceled/rolled back). Who created the ticket does not matter, only its state. Engagements,
+service requests and announcements take no part.
+
+**The workflow position** is the existing `autoclosure_step` / `autoclosure_state_on` columns
+(migrations 0023/0024; the sync used to fill them, so existing `FIRST_COMMENT` / `SECOND_COMMENT` /
+`ON_HOLD` values simply continue). Stages, each one ticket and one step per run:
+
+| Stage | Due when | Does |
+|---|---|---|
+| `release_hold` | step `ON_HOLD` and the held day is over | step `DEFAULT`, clock = now. Nothing posted |
+| `first_reminder` | step none/`DEFAULT`, interval elapsed since the reference time | comment, step `FIRST_COMMENT`, clock = now |
+| `second_reminder` | step `FIRST_COMMENT`, interval since the clock | comment, step `SECOND_COMMENT`, clock = now |
+| `close` | step `SECOND_COMMENT`, interval since the clock | close, then closure comment |
+
+The interval is **7 calendar days** for each stage (`intervalDays`; the support desk runs 24/7/365, so
+business days are deliberately not modelled).
+
+**First-reminder reference time.** Solution Proposed: the later of `resolved_on` and the activity entry
+for entering the state. Awaiting Info: the later of the last **customer-visible comment by an INTERNAL user**
+(never a work note, never the system user's own reminders, never a customer) and entering the state. A
+ticket whose step is `DEFAULT` also waits the interval from the reset, so a ticket coming back from a hold
+or from the customer gets a fresh clock rather than an instant reminder. Fallback: `work_item.updated_on`.
+
+**Hold** keeps the existing contract (`PATCH autocloseHoldUntil`, "Auto-closure hold" above): step `ON_HOLD`
+with the last protected UTC day in `autoclosure_state_on`. A hold suspends **everything** (no reminders,
+no closure): `ON_HOLD` matches no stage. It ends when that day is over (`state_on + 1 day <= now`); the
+ticket then restarts at `DEFAULT` with a fresh clock, so a ticket that was overdue during the hold is
+**not** reminded the moment the hold ends.
+
+**Reset trigger** (`autoclosure_reset`, migration 0249, `BEFORE UPDATE OF state` on `"case"` and
+`security_report_analysis`): on **any** change of state, a parent ticket restarts the workflow (step `DEFAULT`,
+clock = now) when the new state is `WAITING_ON_WSO2` or `REOPENED`, or is `AWAITING_INFO` / `SOLUTION_PROPOSED`
+(entering a waiting state from anywhere, Work in Progress included, is a new request to the customer and must not
+inherit an old clock). **One exception: a ticket on hold keeps its hold when it enters Awaiting Info or Solution
+Proposed** (the customer asked for it not to be closed; swapping between the two waiting states does not cancel
+that); Waiting on WSO2 and Reopened, which a customer reply causes, still end a hold. A trigger so every writer
+(portal, API, sync) restarts the workflow identically. A customer reply moves a waiting ticket to Waiting on WSO2
+through the existing customer-reply rule, which fires it.
+
+**Routes** (internal callers only, `internalOnly`): `POST /autoclosure/candidates` lists what is due, oldest
+reference time first, optionally capped by `dailyLimit`; `POST /autoclosure/cases/{id}/advance` performs one
+stage on one ticket.
+
+**`Advance` is idempotent and race-safe**: it re-runs the listing predicate for that one ticket (a stale
+list is harmless), then **claims** the step with a compare-and-set on `(step, state_on, state)`
+(`ClaimStep`); a run that loses the claim posts nothing. Only then does it act. If the action fails the
+claim is restored (`RestoreStep`) so the next run retries, rather than leaving a ticket marked reminded that
+never was. Every outcome writes a `case_autoclosure_event` audit row.
+
+**Closing.** The close goes through the ordinary `caseService.UpdateCase`, as the system user, so events,
+SLA effects, the activity entry and `closed_by_user_id`/`closed_on` are exactly those of a manual close.
+Awaiting Info tickets get resolution code `ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS_THROUGH_AUTO_CLOSURE` (which
+keeps them out of the KB process); Solution Proposed tickets keep the resolution they were proposed with and
+never get that code. `close_notes` is the closure comment. The closure comment is written **after** the
+close (a comment first and a refused close would leave "this case is closed" on a case that is not); a
+failure of just the comment is logged and does not undo the close. A refused close (for example an open
+child appeared since the listing) is rolled back and retried next run.
+
+**Pending Verification.** A case the workflow closes is queued for the customer's own verification (the
+Pending Verification feature: `pending_verification`, reason `AUTO_CLOSED`, `previous_status` = the state it was
+closed from), so a case closed for inactivity does not silently disappear from their view. `queueForVerification`
+runs after the close and never fails it. It follows the rules `pendingVerificationService.CreatePendingVerification`
+enforces, but writes through `PendingVerificationRepository` as the system user, because that service needs an
+end-user token for "added by" and the workflow has none (this closes the "no machine-to-machine path" gap noted
+for that feature):
+- **Cases only**: a security report analysis is closed but never queued.
+- The project must have `verification_enabled` on; otherwise nothing is queued, quietly.
+- One unverified entry per case: an existing entry (`ConflictError`) counts as done.
+- Wired in `routes.go` with `WithPendingVerificationQueue`; without it (no feature) the close is unchanged.
+- The audit row's `detail` says "queued for customer verification" (or why not, when something failed).
+- **"Added by" is the system user's display name** (the `user.name`, e.g. "Support Team (auto-closure)"), not its email: the customer portal prints the stored value as it is. It falls back to the email if the name cannot be read.
+- **A short `note`** explains the close on the customer's card ("Automatically closed: no response to our request for information after two reminders." / "...to the proposed solution after two reminders.").
+
+**The one transition exemption.** No staff table lists Awaiting Info -> Closed (staff go through Waiting on
+WSO2). `UpdateCase` allows it only when the context carries `withAutoclosureActor` (`autoclosure_context.go`),
+which is unexported and set only by the workflow, and only for a close out of those two waiting states; it also
+attributes the close to the system user. No HTTP request can ask for it.
+
+**Daily limit.** `dailyLimit` is per UTC day across `first_reminder`, `second_reminder` and `close` (hold
+releases send nothing and are exempt). What the audit table says today's `ADVANCED` events already are is
+subtracted, so the three stages share one budget and a run the engine retries the same day cannot exceed it.
+Oldest-first ordering means a backlog never starves the longest-waiting ticket. The limit is applied when
+listing **and again in `Advance`, right before the claim** (`AutoclosureAdvanceRequest.DailyLimit`), so two
+overlapping runs cannot both spend the same remaining budget. Residual: a ticket already in flight in each
+concurrent run when the budget runs out can still complete, so the overshoot is at most one ticket per concurrent run.
+
+**Dry run.** `AutoclosureAdvanceRequest.DryRun` runs the whole decision (still due? within the limit?), records a
+`DRY_RUN` audit row and answers outcome `dry_run`; it posts nothing, claims nothing, closes nothing and queues
+nothing. `DRY_RUN` rows are not counted by the daily limit. The scheduled task sets it from `AUTOCLOSURE_DRY_RUN`
+and forces it for a `TRYOUT_TASK` of this task. A dry run claims nothing, so it can only preview what is due *now* (first reminders for tickets at `DEFAULT`, and later stages only for tickets already carrying a step); a clean dry run on a fresh backlog is therefore **not** sign-off on the close stage.
+
+**A ticket that keeps failing is left out for a while.** A ticket with 3 `FAILED` events for the same stage in the
+last 7 days (`autoclosureMaxFailures`, `autoclosureFailureWindowDays`) is dropped from the listing and the
+per-ticket re-check, so one permanently bad ticket (a refused close, for example) does not raise the same alert on
+every run. `FAILED` is the default: an error nobody has classified (a constraint violation, a wrapped internal error) repeats every run and must end up quarantined. Only errors that say nothing about the ticket are `FAILED_TRANSIENT`, which the cap ignores (a cancelled request or deadline, an unavailable dependency, a network or dropped-connection error, a database connection / resource / shutdown error), so a short outage cannot hide healthy tickets for a week. The listing returns the count it left out as `quarantined` (the scheduled task reports it in its run summary) and logs it. The rows age out of the window by themselves.
+
+**Failure and crash handling.** A step is claimed before the action. If the action fails, or the request is
+cancelled or times out, the claim is restored and the audit row written on a **detached context with its own 15 s
+bound** (`cleanupContext`), so a client that gave up cannot leave the ticket marked reminded with no comment. The one
+window this cannot close is a hard process kill between the claim and the comment: the ticket is then marked
+reminded without having been. It is rare, visible in the audit table (no `ADVANCED` row for the new step), and a
+sweep that re-opens such tickets is the follow-up if it is ever seen.
+
+**Data source and the ServiceNow mirror.** The workflow acts through the deployment's normal case service (`activeCaseSvc`), so its comments, state change and close follow the data source like every other case write: Postgres only on `DATA_SOURCE=postgres`; on `postgres-servicenow-dual-write`, Postgres first with the asynchronous, best-effort ServiceNow mirror (a failed mirror is recorded in `sn_writeback_failures` for replay and never fails or repeats a stage). Its own position (`autoclosure_step` / `autoclosure_state_on`) and the audit table are Postgres-only: ServiceNow has no field that mirror accepts for them. Verified by `TestAutoclosureIntegration_DualWrite*` (dual-write case service wired in):
+- A close carries `resolutionCode`, `cause` (Unknown when the ticket has none) and `closeNotes`, which the dual-write validation requires of an internal caller; a Solution Proposed ticket with no stored resolution code is refused by it (`FAILED`, quarantined after 3).
+- The mirrored close and comments reach ServiceNow as the integration's own M2M user (the scheduled task has no user token), not as the system user; the Postgres rows carry the system user.
+- A failing mirror neither fails the stage nor lets it repeat: the retry is `skipped`.
+- Dry run never reaches the case service, so it is honoured in this mode.
+Needs a decision from the team before enabling under dual-write (not verifiable from this repository): how ServiceNow's own auto-close flow is switched off per state, so both do not act on one ticket (suggest Solution Proposed first); whether ServiceNow accepts the mirrored Awaiting Info -> Closed move (a refusal lands in `sn_writeback_failures`, Postgres stays closed); and whether csm-sync-service writes `u_autoclosure_step` / `u_autoclosure_state_time` back over a claimed step.
+
+**Comment text** lives in `autoclosureDefaultTemplates` (`awaiting_info.` / `solution_proposed.` x
+`first_reminder` / `second_reminder` / `closure`). A caller may send overrides by key in `templates`; the
+scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
+
+**Decisions worth knowing.**
+- A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
+  for the next stage until a full interval has passed.
+- Child tickets are never reminded or closed by the workflow, even one carrying a stale step.
+- A non-closed child blocks every stage, re-checked on every advance and again by `UpdateCase` itself.
+- `autoclose_enabled` has no UI yet; set it in SQL to exclude a ticket.
+- Migration 0249 is idempotent (re-runnable). Upstream numbering moves fast: re-check it is still the next free number against the target branch before merging.
+
+Run the two database test packages one at a time (`go test -p 1 ./internal/repository/ ./internal/service/ -run Autoclosure`): the daily-limit audit count is database-wide and the service tests write audit rows too.
+
+Tests: `autoclosure_repo_integration_test.go` (repository: selection matrix, claim exclusivity, reset trigger,
+audit count; `CASE_STATS_TEST_DSN`), `autoclosure_integration_test.go` (service end to end over the real case
+service, lifecycle through to the closed row; `ENTITY_TEST_DATABASE_URL`; run as `csm_app` so row-level
+security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.go` (units).
 
 ## Change requests
 
@@ -9950,7 +10186,9 @@ requester's email and recorded nothing.
   through `PATCH /deployments/{id}`, whose detail-vs-deactivate rules and ServiceNow write-back do not
   apply to it. `updated_by` is the x-user-id-token's email when present, else `internal-client`.
 - Entity-service only knows internal vs customer callers; restricting it to a staff group is the
-  portal backend's job.
+  portal backend's job. The CSM portal does this: its backend exposes the same
+  `PUT /deployments/{id}/air-gapped` behind `PermWrite` (cs_engineer, admin), and the project's
+  Deployments tab sets or clears it from a deployment's action menu.
 - Read back as `airGapped` on `POST /deployments/search` results (`DeploymentView.AirGapped`, null
   under `DATA_SOURCE=servicenow`), which is where PCS reads it from.
 
@@ -10302,6 +10540,34 @@ new repository method this needed — a single-row lookup
 (`SELECT product_category::TEXT FROM deployed_product WHERE id = $1`,
 lower-cased before returning), deliberately not reusing
 `SearchDeployedProducts`' list/filter machinery for a one-row check.
+
+## Skills (`/skills`, Postgres only)
+
+`SkillService` (`internal/service/skill_service.go`) serves the skill catalogue, each internal user's own
+skills profile, the manager's view of everybody's, and the admin's catalogue edits, over the tables of
+migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only with a database pool.
+
+- **Who.** Catalogue reads: any internal caller. `/skills/me*`: the token's own user, found by the token's
+  email among active internal users; no route takes a person's id, and the identity provider's id is never
+  compared with a platform id. `POST /skills/users/search`: a CSM admin (a token role in `AUTH_ADMIN_ROLES`, as
+  for rota access) or a lead (`lead`, `americas_team_lead`) of a CRE or SRE team. `POST /skills` and
+  `PATCH /skills/{id}`: CSM admin only.
+- **No unique key on `user_skill(user_id, skill_id)`**, and migrated rows are not known to be free of repeats.
+  Every profile write holds `pg_advisory_xact_lock` for the pair and reads the pair's rows `FOR UPDATE`; every
+  read takes one canonical row per pair (`userSkillCanonical`: active, own before inherited, newest). An add
+  over an inactive own row revives it. Adding a held skill is a 409. A unique index needs the production data
+  checked for repeats first, so it is not added here. `skill.name` has no unique key either: create and rename
+  hold a per-name advisory lock and compare ignoring case.
+- **Levels.** A level must belong to the skill's `level_type_id` scale (checked in the service; no FK does it). The profile
+  write re-checks it inside its transaction under `FOR SHARE` on the skill row, which an admin's scale change
+  (`FOR UPDATE`) queues behind; a scale swapped in between is a 409. Ids are lower-cased once validated.
+  Inactive skills cannot be newly added (an add re-reads `active` in that same locked query, so a deactivation
+  racing the add is a 409 too; changing the level of an already-held skill is unaffected). Every set, change and removal writes a `user_skill_history` row
+  (`level_from_id` null on first set, `level_to_id` null on removal; `created_by` is the actor's email); setting
+  the level already held writes nothing. A removal deletes the `user_skill` row. Inherited rows are never
+  changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
+- **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
+  (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
 
 ## Adding a new entity
 
