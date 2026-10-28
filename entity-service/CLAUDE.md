@@ -3844,9 +3844,12 @@ offered states are filtered the same way).
   Re-schedule) / `rollback` (outside the review states) / `assess` (not New) / `new` keep the
   refusal of their own -- **also when the change is already in that state** (a resent
   `{state: scheduled}` is still a 400: staff never name it; the other resends -- `new`, `assess`,
-  `implement`, `review`, `customer_review`, `closed`, `canceled` -- are accepted no-ops). The
-  requested state is **trimmed and read case-insensitively** (`" IMPLEMENT "` is `implement`);
-  a value that is not a state is a 400 `state "X" is not a change request state`.
+  `implement`, `review`, `customer_review`, `closed`, `canceled` -- are accepted no-ops). Through
+  the API the requested state must be the exact lower-case value: `changeRequestService.PatchChangeRequest`
+  refuses anything else (`" IMPLEMENT "` included) with a 400 `state contains invalid value: X`
+  before the repository runs. The repository itself trims and folds case (`" IMPLEMENT "` is
+  `implement` there, and a value that is not a state is a 400 `state "X" is not a change request
+  state`), which only a caller inside the service, such as the repository tests, reaches.
   **`legalNextStates` of Assess no longer lists `authorize`**: the PATCH always refused
   Assess -> Authorize (only the peer approval takes it), so the portal was offered an edge the
   service would not accept; `assess` offers `["canceled"]`. A NULL state is New for the PATCH

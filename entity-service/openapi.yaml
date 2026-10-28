@@ -7198,8 +7198,9 @@ paths:
         what the change request is waiting for and which moves are open (`state
         "implement" cannot be set manually from assess: it is waiting for its peer
         approval, which moves it on by itself; the moves open to staff from assess are:
-        only canceled`). The requested state is trimmed and read without regard to case;
-        a value that is not a change request state is a 400. A refused PATCH writes
+        only canceled`). The requested state must be one of the lower-case values exactly:
+        anything else (a padded or upper-case spelling included) is a 400 (`state contains
+        invalid value: X`) before the change request is read. A refused PATCH writes
         nothing. (scheduled, authorize outside a Re-schedule, customer_approval and
         rollback outside review keep the refusals of their own described below, also when
         the change request is already in that state.)
@@ -23762,7 +23763,16 @@ components:
           type: string
           nullable: true
         project:
-          $ref: '#/components/schemas/EntityRef'
+          type: object
+          description: >-
+            The change request's Customer Project. Never null: a change request with no
+            project carries an empty id and name.
+          properties:
+            id:
+              type: string
+              description: The project's id (a UUID), or an empty string when there is no project.
+            name:
+              type: string
         case:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -23775,6 +23785,22 @@ components:
         product:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
+        service:
+          nullable: true
+          description: >-
+            The service the change request is for, set by serviceId on create or PATCH. Null
+            when none is set, and always null when change requests are read from the previous
+            system directly.
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        serviceOffering:
+          nullable: true
+          description: >-
+            The service offering, set by serviceOfferingId on create or PATCH. Null when none
+            is set, and always null when change requests are read from the previous system
+            directly.
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -23788,6 +23814,8 @@ components:
             The planned start, RFC 3339 in UTC. Printed with the fractional seconds the stored value
             has (and none when it holds whole seconds, as every migrated row does), so that what is
             read goes back unchanged as expectedPlannedStartOn: those compare the instants exactly.
+            When change requests are read from the previous system directly, the value is passed
+            through as that system sends it.
         plannedEndOn:
           type: string
           nullable: true
@@ -23807,6 +23835,25 @@ components:
           type: string
           nullable: true
           description: Type label (e.g. "standard", "normal").
+        onHold:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether the change request is on hold, set by PATCH onHold. While it is true, a PATCH
+            that sets state (unless the same PATCH sends onHold false) and WSO2's acceptance of a
+            customer's proposed time (confirmCustomerUpdatedDate) are refused (400), and a
+            customer's proposed implementation time is refused (409, errorCode
+            change_request_on_hold); the customer's answer is not refused. Null when no value is
+            stored, and always null when change requests are read from the previous system
+            directly.
+        onHoldReason:
+          type: string
+          nullable: true
+          description: >-
+            Why the change request is on hold; display only. PATCH onHold true writes the
+            onHoldReason sent with it, or clears it when none is sent; onHold false clears it;
+            onHoldReason sent alone replaces it. Always null when change requests are read from
+            the previous system directly.
         createdOn:
           type: string
         updatedOn:
@@ -24003,6 +24050,7 @@ components:
               nullable: true
             legalNextStates:
               type: array
+              nullable: true
               items:
                 type: string
               description: >-
@@ -24019,8 +24067,7 @@ components:
                 Standard -- customer_approval instead when
                 customerApprovalRequired, which an Emergency change never has in effect).
                 assess: [canceled] (the peer approval moves the change on by
-                itself, to authorize -- Assess -> Authorize was listed here
-                before although no PATCH ever took it); authorize: [canceled]
+                itself, to authorize); authorize: [canceled]
                 (CAB approval moves the change on by itself: to scheduled,
                 or to customer_approval when customerApprovalRequired -- never for an
                 Emergency change, whose CAB approval always schedules it).
@@ -24047,12 +24094,14 @@ components:
                 failed review is then the customer's to give too).
                 "rollback" (the failed-review off-ramp) is accepted only from
                 review and customer_review; it is terminal. closed, canceled and
-                rollback offer nothing. These are exactly the states a staff PATCH
-                is accepted for (see PATCH /change-requests/{id}, "Transition
-                graph"); a change request with no state offers nothing.
-                Terminal states: none.
-                "scheduled" is offered from no state, and "closed" is not offered
-                from customer_review, on the ServiceNow data source either.
+                rollback offer nothing, and neither does a change request with no
+                state: on the PostgreSQL data source the field is null in both cases,
+                not an empty array. These are exactly the states a staff PATCH is accepted
+                for (see PATCH /change-requests/{id}, "Transition graph").
+                On the data source that talks to the previous system directly the
+                list is what that system returns, without "scheduled" (from any
+                state) and without "closed" from customer_review; null when that
+                system sends no list.
             implementationPlan:
               type: string
               nullable: true
@@ -24071,8 +24120,10 @@ components:
               type: string
               nullable: true
               description: >-
-                Normally one of critical/high/moderate/low. An unmapped upstream
-                choice is passed through as its raw label.
+                On the PostgreSQL data source the stored value in lower case: critical,
+                high, moderate, low or planning. On the data source that talks to the
+                previous system directly, critical, high, moderate or low, or the raw
+                label of any other choice.
             category:
               type: string
               nullable: true
@@ -24094,36 +24145,59 @@ components:
               description: Raw, unvalidated free text (e.g. "10 mins").
             deploymentProducts:
               type: array
+              nullable: true
               items:
                 $ref: '#/components/schemas/EntityRef'
               description: >-
                 Read-only, derived from `deployments`: the deployed products of
-                the chosen deployments, named "<product> <version>".
+                the chosen deployments, named "<product> <version>". Always an array
+                on the PostgreSQL data source (empty when none); null on the data
+                source that talks to the previous system directly when it reports none.
             customerContacts:
               type: array
+              nullable: true
               description: >-
                 The change request's Customer Group, READ-ONLY and derived live
                 (never stored): the REGISTERED portal-user contacts (a
                 project_contact in state REGISTERED holding the PORTAL_USER
-                project role, whose user is active) of the change request's
-                Customer Project, name order. Always an array: empty without a
-                project or without such contacts. They are the customer's
+                project role, whose user, when it has one, is not deactivated) of
+                the change request's Customer Project, name order. Always an array
+                on the PostgreSQL data source: empty without a project or without
+                such contacts. Null on the data source that talks to the previous
+                system directly, which does not derive it. They are the customer's
                 approvers at Customer Approval / Customer Review.
               items:
                 $ref: '#/components/schemas/ChangeRequestCustomerContact'
             changeRequestType:
               type: string
               nullable: true
-              description: Read-through only; no write path is exposed for this field.
+              description: >-
+                Read-through only; no write path is exposed for this field. A separate
+                classification from `type`. On the PostgreSQL data source infra or
+                general; on the data source that talks to the previous system directly,
+                the raw label.
             likelihood:
               type: string
               nullable: true
-              description: Read-through only; no write path is exposed for this field.
+              description: >-
+                Read-through only; no write path is exposed for this field. On the
+                PostgreSQL data source low, medium or high; on the data source that talks
+                to the previous system directly, the raw label.
             isPlanningVisibleToCustomers:
               type: boolean
+              description: >-
+                The "Implementation Plan visible to customers" setting as stored. False
+                when it was never set.
             confirmCustomerUpdatedDate:
               type: string
               nullable: true
+              description: >-
+                WSO2's answer to the proposed start in customerUpdatedOn. On the PostgreSQL
+                data source "agree" (written by Accept proposed time: PATCH
+                confirmCustomerUpdatedDate "agree") or "disagree" (written by Propose a
+                different time, or a decline, while a proposal waits: PATCH state
+                "authorize"); null while nothing has been answered, and cleared when a new
+                time is proposed.
             customerUpdatedOn:
               type: string
               nullable: true
@@ -24133,8 +24207,13 @@ components:
                 workEnd are printed the same way.
             labels:
               type: array
+              nullable: true
               items:
                 type: string
+              description: >-
+                Read-only. Null on the PostgreSQL data source, which has no column for
+                labels; the data source that talks to the previous system directly
+                passes its labels through.
             tags:
               type: array
               nullable: true
@@ -24151,11 +24230,14 @@ components:
                 A tag added to a change request is never mirrored to the previous system.
             deployments:
               type: array
+              nullable: true
               items:
                 $ref: '#/components/schemas/EntityRef'
               description: >-
                 The project's deployments the change touches (the project is
-                `project`). Always an array on the PostgreSQL data source.
+                `project`). Always an array on the PostgreSQL data source (empty when
+                none); null on the data source that talks to the previous system
+                directly when it reports none.
             workStart:
               type: string
               nullable: true
@@ -24704,6 +24786,10 @@ components:
         configurationItemId:
           type: string
           format: uuid
+          description: >-
+            Not stored by the PostgreSQL data source. Forwarded only by the data source
+            that talks to the previous system directly and by the create that writes the
+            previous system first, where a value that is not a UUID is a 400.
         priority:
           type: string
           enum:
@@ -24721,16 +24807,12 @@ components:
           type: string
           enum:
             - new
-            - assess
-            - authorize
-            - customer_approval
-            - scheduled
-            - implement
-            - review
-            - customer_review
-            - rollback
-            - closed
-            - canceled
+          description: >-
+            Optional. A change request is always created in new. Any other value is a
+            400 ("a change request can only be created in the New state, not ...") on
+            the data source that talks to the previous system directly and on the create
+            that writes the previous system first, before that system is called. When the
+            change request is created in PostgreSQL only, the field is ignored.
         groupId:
           type: string
           format: uuid
@@ -24817,11 +24899,12 @@ components:
           format: uuid
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED. Any value is a 400 `customerGroupId is no longer
+            NO LONGER ACCEPTED. Any value but null is a 400 `customerGroupId is no longer
             accepted: the customer group is derived from the customer project's
-            registered contacts`. The Customer Group is read-only: the REGISTERED
-            portal-user contacts of `projectId`, exposed as `customerContacts` on
-            the change request and by POST /change-requests/link-options.
+            registered contacts`; an explicit null is read as omitted. The Customer
+            Group is read-only: the REGISTERED portal-user contacts of `projectId`,
+            exposed as `customerContacts` on the change request and by POST
+            /change-requests/link-options.
         projectId:
           type: string
           format: uuid
@@ -24854,9 +24937,9 @@ components:
             type: string
             format: uuid
           description: >-
-            NO LONGER SUPPORTED. Any value is a 400 `environmentIds is no longer
-            supported: deployments carry the environment` (a deployment's type is
-            its environment role).
+            NO LONGER SUPPORTED. Any value but null (an empty array included) is a 400
+            `environmentIds is no longer supported: deployments carry the environment` (a
+            deployment's type is its environment role); an explicit null is read as omitted.
         deploymentProductIds:
           type: array
           maxItems: 100
@@ -24871,15 +24954,21 @@ components:
             source only.
         durationInput:
           type: integer
+          minimum: 0
           description: >-
-            Calendar duration in whole seconds. Accepted only when it exactly
-            matches the effective planned window (plannedStartDate to
-            plannedEndDate in this same request).
+            Calendar duration in whole seconds. Not stored by the PostgreSQL data source,
+            and ignored when the change request is created in PostgreSQL only. On the data
+            source that talks to the previous system directly, and on the create that
+            writes the previous system first, it is forwarded to that system and must
+            exactly match the planned window: plannedStartDate and plannedEndDate are both
+            required with it and it must equal the seconds between them, else a 400; a
+            negative value is a 400 too.
         isPlanningVisibleToCustomers:
           type: boolean
           description: >-
-            Whether the Implementation Plan is visible to customers on the
-            customer-facing portal.
+            The "Implementation Plan visible to customers" checkbox. Stored and returned as sent
+            (forwarded to the previous system when the change request is written there); this
+            service does not otherwise act on it.
         customerApprovalRequired:
           type: boolean
           description: >-
@@ -25061,6 +25150,24 @@ components:
           type: string
           format: uuid
           description: Held to the same project and window as deploymentId.
+        serviceId:
+          type: string
+          format: uuid
+          description: >-
+            The IT service (an id from POST /services/search). An id that refers to no service is
+            a 400 ("serviceId does not refer to an existing record"). It cannot be cleared: an
+            explicit null is read as omitted. It does not count as a field on its own: a request
+            that carries nothing but serviceId and serviceOfferingId is a 400 ("at least one field
+            must be provided"). PostgreSQL data source only: the data source that talks to the
+            previous system directly ignores it, and it is not mirrored to the previous system.
+        serviceOfferingId:
+          type: string
+          format: uuid
+          description: >-
+            The service offering (an id from POST /service-offerings/search). It is not checked
+            against serviceId. An id that refers to no offering is a 400 ("serviceOfferingId does
+            not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it
+            does not count as a field on its own, and it is PostgreSQL data source only.
         assignedEngineerId:
           type: string
           format: uuid
@@ -25127,16 +25234,23 @@ components:
         state:
           type: string
           description: >-
-            Accepted only along the transition graph (see the operation description): the
-            state the change request is in (a no-op) or one of the moves legalNextStates
-            offers from it; trimmed and case-insensitive. closed, canceled and rollback
-            are final (400 for any other state). "new" is accepted only for a change
-            request that is still in new (a no-op); once it has left New it cannot return
-            (400). "scheduled" is never accepted from an internal caller (it is reached by
-            the approval flow, or by the customer's own approval out of customer_approval);
-            out of customer_approval / customer_review only canceled, authorize
-            (Re-schedule / Propose a different time, customer_approval: the state does not
-            move) and rollback (customer_review) are accepted.
+            Accepted only along the transition graph (see the operation description): one of the
+            moves legalNextStates offers from the state the change request is in, or that state
+            again (a no-op), with the exceptions below. The value must be one of the lower-case
+            values below exactly; any other spelling, case or padding is a 400. closed, canceled
+            and rollback are final (400 for any other state). "new" is accepted only for a change
+            request that is still in new (a no-op); once it has left New it cannot return (400).
+            "assess" out of new is Request Approval (where it lands depends on the type, see the
+            operation description). "scheduled" and "customer_approval" are never accepted, also
+            when the change request is already in them: they are reached through the approval
+            flow, and scheduled also by the customer's own approval out of customer_approval.
+            "authorize" is accepted only out of customer_approval (Re-schedule / Propose a
+            different time: the state does not move), and "rollback" only from review, or from
+            customer_review while nobody is being asked. Out of customer_approval /
+            customer_review only canceled, authorize (customer_approval) and rollback
+            (customer_review) are accepted. While the change request is on hold, a request that
+            carries state, the state it is already in included, is a 400 unless the same request
+            sends onHold false.
           enum:
             - new
             - assess
@@ -25152,11 +25266,19 @@ components:
         type:
           type: string
           description: >-
-            The change type. Frozen once approval has been requested. Changing a change
-            INTO emergency while customerApprovalRequired or customerReviewRequired would
-            stay true is a 400 ("Emergency changes proceed without customer consent, so
-            customer approval and customer review cannot be required: turn off ... before
-            changing the type to emergency"); send the boxes as false in the same request.
+            The change type. Which values are accepted depends on the data source: the PostgreSQL
+            data sources accept standard, normal, emergency, azure, change_registration,
+            cloud_infrastructure, infra and unauthorized_change, and refuse model and
+            site_reliability_ops (400 'type "model" is not supported on the PostgreSQL data
+            source'); the data source that talks to the previous system directly accepts
+            standard, normal, emergency, model, site_reliability_ops and azure. On the PostgreSQL
+            data sources the type can be changed only while the change request is new (or has no
+            state): afterwards a different type is a 400 ("type can no longer be changed: ...")
+            and the stored type resent is accepted. Changing a change INTO emergency while
+            customerApprovalRequired or customerReviewRequired would stay true is a 400
+            ("Emergency changes proceed without customer consent, so customer approval and
+            customer review cannot be required: turn off ... before changing the type to
+            emergency"); send the boxes as false in the same request.
           enum:
             - standard
             - normal
@@ -25164,6 +25286,10 @@ components:
             - model
             - site_reliability_ops
             - azure
+            - change_registration
+            - cloud_infrastructure
+            - infra
+            - unauthorized_change
         justification:
           type: string
         impactDescription:
@@ -25195,11 +25321,40 @@ components:
             on the customer's behalf ...`) that writes nothing.
         requestApproval:
           type: boolean
+          description: >-
+            true records that approval has been requested (the change request's approval is set
+            to requested); false leaves it as it is. It does not move the state: Request Approval
+            is state "assess". Still accepted once the change request has been approved. On the
+            data source that talks to the previous system directly it is forwarded as sent, and
+            at most one of isCustomerApproved, isCustomerReviewed and requestApproval may be set
+            (400 otherwise).
+        onHold:
+          type: boolean
+          description: >-
+            Puts the change request on hold (true) or takes it off hold (false). true sets the
+            hold reason to onHoldReason from the same request, or clears it when onHoldReason is
+            not sent; false always clears the reason. While the change request is on hold (as
+            stored, before this request), a request that carries state, the state it is already
+            in included, is a 400 ("change request is on hold; take it off hold (onHold: false)
+            before changing its state") unless it also sends onHold false. confirmCustomerUpdatedDate
+            is refused with the same 400, and a customer's proposed implementation time with a 409
+            (errorCode change_request_on_hold); other requests are not affected. Not under the
+            approved-content lock. PostgreSQL data source only: the data source that talks to the
+            previous system directly ignores it (sent with nothing else it is a 400 "at least one
+            field must be provided" there), and it is not mirrored to the previous system.
+        onHoldReason:
+          type: string
+          description: >-
+            Why the change request is on hold (free text). With onHold true it becomes the hold
+            reason; with onHold false it is ignored and the reason is cleared. Sent without onHold
+            it replaces the stored reason, whether or not the change request is on hold.
+            PostgreSQL data source only, as onHold.
         isPlanningVisibleToCustomers:
           type: boolean
           description: >-
-            Whether the Implementation Plan is visible to customers on the
-            customer-facing portal.
+            The "Implementation Plan visible to customers" checkbox. Stored and returned as sent
+            (forwarded on the data source that talks to the previous system directly); this
+            service does not otherwise act on it.
         customerApprovalRequired:
           type: boolean
           description: >-
@@ -25219,19 +25374,24 @@ components:
         customerReviewRequired:
           type: boolean
           description: >-
-            The "Customer Review" checkbox. Free while the change request is new. From
-            Request Approval on it is ADD-ONLY: true to false is a 400 in every state
-            ("customerReviewRequired can no longer be turned off ..."); false to true is
-            accepted up to and including review (from customer_review onwards "can no
-            longer be changed ...: the change request has already left the review stage")
-            and only when the change request has a Customer Project with somebody who can
-            be asked ("customer review is required but nobody on this project can be asked
-            ..."). Cannot be turned ON for an Emergency change, in any state (the same 400
-            as customerApprovalRequired). PostgreSQL data source only.
+            The "Customer Review" checkbox. Free while the change request is new. From Request
+            Approval on it is ADD-ONLY: true to false is a 400 in every state
+            ("customerReviewRequired can no longer be turned off ..."). Turning it on needs a
+            Customer Project ("cannot be turned on: this change request has no Customer Project
+            ...") and is accepted only while the state is assess or authorize, and only when
+            somebody on the project can be asked ("customer review is required but nobody on this
+            project can be asked ..."). In customer_approval, scheduled, implement and review the
+            change request has been approved and its fields are read-only (400 errorCode
+            change_request_approved_read_only); in customer_review, rollback, closed and canceled
+            a change is a 400 ("can no longer be changed ...: the change request has already left
+            the review stage"). Resending the stored value is always accepted. Cannot be turned ON
+            for an Emergency change, in any state (the same 400 as customerApprovalRequired).
+            PostgreSQL data source only.
         implementationPlan:
           type: string
-          nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            The implementation plan (rich text, stored as sent). An empty string empties it; an
+            explicit null is read as omitted (it does not clear the field).
         implementationDeviation:
           type: string
           description: >-
@@ -25251,45 +25411,51 @@ components:
             mirrored to the previous system.
         priority:
           type: string
-          nullable: true
           enum: [critical, high, moderate, low]
-          description: Explicit null clears the field.
+          description: >-
+            An explicit null is read as omitted, so the priority cannot be cleared through this
+            API.
         category:
           type: string
-          nullable: true
           enum: [hardware, software, service, system_software, applications_software,
                  network, telecom, documentation, other, regular_release_cloud,
                  hotfix_release_cloud, devops, cloud_computing]
-          description: Explicit null clears the field.
+          description: >-
+            An explicit null is read as omitted, so the category cannot be cleared through this
+            API.
         requestedById:
           type: string
           format: uuid
-          nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            The requester (a user id). An explicit null is read as omitted, so the requester
+            cannot be cleared through this API. Once the change request has left new, a
+            different requester is a 400 when a customer approval or review still ahead would
+            then have nobody on the project to ask (the requester never approves their own
+            change).
         affectedServicesText:
           type: string
-          nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            Free text. An empty string empties it; an explicit null is read as omitted (it does
+            not clear the field).
         affectedComponentsText:
           type: string
-          nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            Free text. An empty string empties it; an explicit null is read as omitted (it does
+            not clear the field).
         rollbackDurationText:
           type: string
-          nullable: true
-          description: Raw, unvalidated free text. Explicit null clears the field.
+          description: >-
+            Raw, unvalidated free text. An empty string empties it; an explicit null is read as
+            omitted (it does not clear the field).
         customerGroupId:
           type: string
           format: uuid
-          nullable: true
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED (any value, null included, is a 400 `customerGroupId
-            is no longer accepted: the customer group is derived from the customer
-            project's registered contacts`). The Customer Group is read-only and
-            follows `projectId`: changing the project re-derives it, and a live
-            Customer Approval / Customer Review stage is replaced by one for the new
-            project's contacts.
+            NO LONGER ACCEPTED: any value but null is a 400 (`customerGroupId is no longer
+            accepted: the customer group is derived from the customer project's registered
+            contacts`); an explicit null is read as omitted. The Customer Group is read-only:
+            it is derived from the registered contacts of the change request's project.
         deploymentIds:
           type: array
           maxItems: 100
@@ -25312,17 +25478,16 @@ components:
             resending the stored value is accepted. PostgreSQL data source only.
         environmentIds:
           type: array
-          nullable: true
           deprecated: true
           items:
             type: string
             format: uuid
           description: >-
-            NO LONGER SUPPORTED. Any value is a 400 `environmentIds is no longer
-            supported: deployments carry the environment`.
+            NO LONGER SUPPORTED. Any value but null (an empty array included) is a 400
+            `environmentIds is no longer supported: deployments carry the environment`; an
+            explicit null is read as omitted.
         deploymentProductIds:
           type: array
-          nullable: true
           maxItems: 100
           items:
             type: string
@@ -25330,7 +25495,7 @@ components:
           description: >-
             READ-ONLY, derived from the deployments. Accepted only when it is
             exactly the derived set (otherwise 400); the stored list is always
-            the derived one.
+            the derived one. An explicit null is read as omitted.
         comment:
           type: string
           description: >-
@@ -25343,10 +25508,12 @@ components:
             type `work_note`). Cannot be empty and cannot clear anything.
         durationInput:
           type: integer
-          nullable: true
+          minimum: 0
           description: >-
-            Calendar duration in whole seconds. Accepted only when it exactly
-            matches the effective planned window. Explicit null clears the field.
+            Calendar duration in whole seconds. The PostgreSQL data sources refuse any value (400
+            "durationInput is not supported on this data source"). The data source that talks to
+            the previous system directly forwards it as sent, without checking it against the
+            planned window; a negative value is a 400. An explicit null is read as omitted.
 
     PatchChangeRequestResponse:
       type: object
