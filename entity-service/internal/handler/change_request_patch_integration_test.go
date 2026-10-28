@@ -113,7 +113,11 @@ func (m *cpiMirror) createsReceived() int {
 }
 
 type changeRequestPatchEnv struct {
-	pool   *pgxpool.Pool
+	// scoped runs the test's own reads and writes as the system, as the
+	// cleanup does: the tables have row-level policies, so a plain pool query
+	// by a role that does not bypass them (csm_app) sees and changes nothing.
+	scoped *repository.Scoped
+	sys    context.Context
 	repo   repository.ChangeRequestRepository
 	mirror *cpiMirror
 	// mux serves PATCH and POST through the dual-write service (the create
@@ -177,7 +181,7 @@ func newChangeRequestPatchEnv(t *testing.T) *changeRequestPatchEnv {
 
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"` + cpiEmail + `"}`))
-	return &changeRequestPatchEnv{pool: pool, repo: repo, mirror: mirror, mux: mux, plainMux: plainMux, token: header + "." + payload + ".sig"}
+	return &changeRequestPatchEnv{scoped: scoped, sys: sys, repo: repo, mirror: mirror, mux: mux, plainMux: plainMux, token: header + "." + payload + ".sig"}
 }
 
 func cpiStr(s string) *string { return &s }
@@ -260,7 +264,7 @@ type cpiRow struct {
 func (e *changeRequestPatchEnv) row(t *testing.T, id string) cpiRow {
 	t.Helper()
 	var r cpiRow
-	if err := e.pool.QueryRow(context.Background(), `
+	if err := e.scoped.QueryRow(e.sys, `
 		SELECT implementation_plan, priority::text, category::text, affected_services, affected_component,
 		       rollback_duration, service_id::text
 		  FROM change_request WHERE id = $1`, id,
@@ -361,8 +365,8 @@ func TestChangeRequestPatchIntegration_PriorityIsValidated(t *testing.T) {
 
 	// A row migrated with the previous system's priority 5 still reads back as
 	// "planning": only the write refuses it.
-	if _, err := e.pool.Exec(context.Background(), `UPDATE change_request SET priority = 'PLANNING' WHERE id = $1`, id); err != nil {
-		t.Fatalf("seed PLANNING: %v", err)
+	if tag, err := e.scoped.Exec(e.sys, `UPDATE change_request SET priority = 'PLANNING' WHERE id = $1`, id); err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("seed PLANNING: %d rows, %v", tag.RowsAffected(), err)
 	}
 	cr, err := e.repo.GetChangeRequestByID(repository.WithSystemIdentity(context.Background()), id)
 	if err != nil {
@@ -386,7 +390,7 @@ func TestChangeRequestPatchIntegration_HoldIsNotMirrored(t *testing.T) {
 		t.Errorf("a hold-only PATCH was sent to the previous system: %+v", got)
 	}
 	var failures int
-	if err := e.pool.QueryRow(context.Background(),
+	if err := e.scoped.QueryRow(e.sys,
 		`SELECT count(*) FROM sn_writeback_failures WHERE entity_type = 'change_request' AND entity_id = $1`, id,
 	).Scan(&failures); err != nil {
 		t.Fatalf("count write-back failures: %v", err)
@@ -404,7 +408,7 @@ func TestChangeRequestCreateLevelsIntegration_BothCreates(t *testing.T) {
 	e := newChangeRequestPatchEnv(t)
 	countRows := func() int {
 		var n int
-		if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM work_item WHERE subject = $1`, cpiSubject).Scan(&n); err != nil {
+		if err := e.scoped.QueryRow(e.sys, `SELECT count(*) FROM work_item WHERE subject = $1`, cpiSubject).Scan(&n); err != nil {
 			t.Fatalf("count change requests: %v", err)
 		}
 		return n
@@ -435,7 +439,7 @@ func TestChangeRequestCreateLevelsIntegration_BothCreates(t *testing.T) {
 				t.Fatalf("a create with settable values = %d %q, want 201", code, msg)
 			}
 			var priority, impact, risk string
-			if err := e.pool.QueryRow(context.Background(), `
+			if err := e.scoped.QueryRow(e.sys, `
 				SELECT cr.priority::text, cr.impact::text, cr.risk::text
 				  FROM change_request cr JOIN work_item wi ON wi.id = cr.id
 				 WHERE wi.subject = $1 ORDER BY wi.created_on DESC LIMIT 1`, cpiSubject,
