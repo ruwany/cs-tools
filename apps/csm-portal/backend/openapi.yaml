@@ -17835,7 +17835,7 @@ components:
         priority:
           type: string
           nullable: true
-          enum: [critical, high, moderate, low]
+          enum: [critical, high, moderate, low, null]
           description: >-
             Any other value is a 400 (on the PostgreSQL data sources `priority must be one of
             critical, high, moderate or low`, as on create), planning included (a change request
@@ -17991,7 +17991,7 @@ components:
             change request's project (`customerContacts` on the detail).
         category:
           type: string
-          enum: [hardware, software, service, system_software, applications_software, network, telecom, documentation, other, regular_release_cloud, hotfix_release_cloud, devops, cloud_computing]
+          enum: [hardware, software, service, system_software, applications_software, network, telecom, documentation, other, regular_release_cloud, hotfix_release_cloud, devops, cloud_computing, null]
           nullable: true
           description: >-
             A value that is neither a string nor null is a 400. An explicit null clears the
