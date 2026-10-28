@@ -6147,8 +6147,9 @@ has no `"user"` row (nothing to record them by). Deduplicating users can clear a
 row sets the record's user to NULL (`ON DELETE SET NULL`), and the proposal then reads "nobody is recorded". The next proposal on
 that change records itself. Apply migrations 0249 and 0250 before deploying the build that records proposers, and deploy it
 straight after (the gap above): its detail read and the proposal name 0249's columns (the older build never does), and 0250 needs
-0249 and refuses to run without it. The migration sets `lock_timeout` (5s, as 0207 does): creating the trigger locks `work_item`
-against writes until the commit. It is safe to run again (`CREATE OR REPLACE TRIGGER`, which takes no ACCESS EXCLUSIVE lock).
+0249 and refuses to run without it. Both set `lock_timeout` (5s, as 0207 does), so their waits for the locks on `change_request`
+and `work_item` are bounded, and both are safe to run again (`CREATE OR REPLACE TRIGGER`, which takes no ACCESS EXCLUSIVE lock).
+Migration 0263 builds the index on `customer_proposed_by_user_id` concurrently, in a file of its own.
 
 **The trigger is temporary**: once the build that records proposers is deployed and nothing writes `customer_updated_on` directly
 (the sync can, while it runs), nothing stores a time without a record, so the set it protects only shrinks. Drop it in a new

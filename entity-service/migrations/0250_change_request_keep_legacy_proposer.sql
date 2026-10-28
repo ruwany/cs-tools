@@ -90,14 +90,12 @@
 -- (callerIsRegisteredPortalContact): change the two together.
 --
 -- Safe to run again: the function and the trigger replace themselves (CREATE OR REPLACE TRIGGER, so
--- a re-run takes no ACCESS EXCLUSIVE lock). Creating the trigger locks work_item against writes until
--- the commit, so the lock wait is bounded as 0207's is. One transaction, so a psql -f run of this
--- file alone cannot leave the function without the trigger. Needs migration 0249: it refuses to run
--- without 0249's columns, which the function names (a function without them would fail every write
--- of a change request that changes its writer).
+-- a re-run takes no ACCESS EXCLUSIVE lock). Creating the trigger locks work_item against writes for
+-- that statement, so the lock wait is bounded as 0207's is. A run that stops after the function and
+-- before the trigger leaves a function nothing calls, and the next run finishes it. Needs migration
+-- 0249: it refuses to run without 0249's columns, which the function names (a function without them
+-- would fail every write of a change request that changes its writer).
 SET lock_timeout = '5s';
-
-BEGIN;
 
 DO $$
 BEGIN
@@ -158,7 +156,5 @@ CREATE OR REPLACE TRIGGER work_item_keep_legacy_customer_proposer
     FOR EACH ROW
     WHEN (OLD.type::text = 'CHANGE_REQUEST' AND OLD.updated_by IS DISTINCT FROM NEW.updated_by)
     EXECUTE FUNCTION trg_work_item_keep_legacy_customer_proposer();
-
-COMMIT;
 
 RESET lock_timeout;

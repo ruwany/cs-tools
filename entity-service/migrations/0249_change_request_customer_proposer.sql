@@ -42,18 +42,16 @@
 -- does not see it: that PATCH voids the record the same way in its own UPDATE
 -- (patchChangeRequestTx).
 --
--- Safe to run again: every statement is guarded or replaces itself
--- (TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain). One transaction, so a
--- psql -f run of this file alone cannot leave the columns without the trigger.
-BEGIN;
+-- Safe to run again, and a run that stops partway is finished by the next one: every statement
+-- is guarded or replaces itself (TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain),
+-- and CREATE OR REPLACE TRIGGER swaps the trigger in one statement, so there is no moment without
+-- it. The waits for the locks on change_request are bounded. The index on
+-- customer_proposed_by_user_id is built concurrently, by migration 0263.
+SET lock_timeout = '5s';
 
 ALTER TABLE change_request ADD COLUMN IF NOT EXISTS customer_proposed_by_user_id UUID REFERENCES "user"(id) ON DELETE SET NULL;
 ALTER TABLE change_request ADD COLUMN IF NOT EXISTS customer_proposed_for TIMESTAMPTZ;
 ALTER TABLE change_request ADD COLUMN IF NOT EXISTS customer_proposed_on TIMESTAMPTZ;
-
--- The other "user" references of change_request are indexed too; it keeps a user delete (ON
--- DELETE SET NULL) from scanning the table.
-CREATE INDEX IF NOT EXISTS idx_change_request_customer_proposed_by_user_id ON change_request (customer_proposed_by_user_id);
 
 CREATE OR REPLACE FUNCTION trg_change_request_void_customer_proposer() RETURNS trigger AS $$
 BEGIN
@@ -68,9 +66,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS change_request_void_customer_proposer ON change_request;
-CREATE TRIGGER change_request_void_customer_proposer
+CREATE OR REPLACE TRIGGER change_request_void_customer_proposer
     BEFORE UPDATE OF state ON change_request
     FOR EACH ROW EXECUTE FUNCTION trg_change_request_void_customer_proposer();
 
-COMMIT;
+RESET lock_timeout;

@@ -23,4 +23,11 @@
 -- field, so it lives here only and is never mirrored.
 --
 -- Additive and idempotent: safe to re-run against a database that already has it.
+-- Adding the column locks change_request against reads and writes for a moment (a
+-- nullable column with no default rewrites nothing), so the wait for that lock is
+-- bounded.
+SET lock_timeout = '5s';
+
 ALTER TABLE change_request ADD COLUMN IF NOT EXISTS implementation_deviation TEXT;
+
+RESET lock_timeout;
