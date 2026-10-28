@@ -163,7 +163,8 @@ export const REQUEST_APPROVAL_NEEDS_TEAM_SKIPPED =
 
 /**
  * The words for a change request with a customer step ticked and no Customer Project that was asked to request
- * approval. No "set one in the same edit": a bulk edit sets the project only when every selected one is New.
+ * approval. Unlike the assignment group, the project can't always be set in the same edit: a bulk edit sets it only
+ * when every selected change request is New.
  */
 export const REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED =
   "A customer step is ticked and there is no Customer Project, so approval can't be requested until it has one.";

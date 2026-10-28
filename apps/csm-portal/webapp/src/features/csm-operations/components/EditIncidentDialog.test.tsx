@@ -289,7 +289,7 @@ describe("EditIncidentDialog required-field markers", () => {
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: option }));
   };
 
-  it("marks Subject, Category, Channel, Impact, Urgency and State required on any save, and the optional fields not", () => {
+  it("marks Subject, Category, Channel, Impact, Urgency and a changeable State required on any save, and the optional fields not", () => {
     render(<EditIncidentDialog incident={IN_PROGRESS} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
 
     expect(screen.getByRole("textbox", { name: /^subject$/i })).toBeRequired();

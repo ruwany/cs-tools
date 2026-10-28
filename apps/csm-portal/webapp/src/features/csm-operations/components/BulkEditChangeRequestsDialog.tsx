@@ -307,8 +307,8 @@ export default function BulkEditChangeRequestsDialog({
       ).length
     : 0;
   // The Customer Project can be set here only while every selected change request is New ("project"), so only then
-  // is it marked required. Otherwise (a mixed selection) the picker is disabled, and the ones lacking one are named in
-  // a plain note under it instead.
+  // is it marked required. Otherwise the picker is disabled, and the ones lacking one are counted in a plain note
+  // under it instead.
   const projectRequired = scopeMode === "project" && lackingProjectCount > 0;
   /** "N of the selected change requests have no X": why a field is required to request approval. */
   const lackingHelper = (n: number, what: string): string =>

@@ -388,6 +388,12 @@ describe("bulkChangeRequestPlan — Request Approval", () => {
     ).toEqual({ patch: { state: "assess", projectId: "proj-1", deploymentIds: [] } });
   });
 
+  it("words that skip so it holds for a mixed selection, whose project the same edit can't set", () => {
+    expect(REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED).toBe(
+      "A customer step is ticked and there is no Customer Project, so approval can't be requested until it has one.",
+    );
+  });
+
   it("asks no project of an Emergency change, stored or re-typed in the edit", () => {
     expect(
       bulkChangeRequestPlan({ state: "new", type: "emergency", assignedTeam: TEAM, customerApprovalRequired: true }, { state: "assess" }),
