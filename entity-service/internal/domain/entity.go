@@ -933,6 +933,33 @@ type SalesforceMembershipUpsert struct {
 	// in after the upsert; every other group membership of this project
 	// contact is removed.
 	ProjectGroups []string
+
+	// DeferredSalesforceWrite, when set, makes the repository record a
+	// salesforce_write_request row in the transaction that writes these
+	// rows: the Salesforce half did not run (sales-entity-service was
+	// unavailable), the sf_id columns stay NULL, and the request row is what
+	// the asynchronous consumer later carries out. Portal writes only.
+	DeferredSalesforceWrite *DeferredSalesforceWrite
+	// CompletesSalesforceWriteRequestID, when set, is the
+	// salesforce_write_request row this upsert fulfils: it is marked
+	// SUCCEEDED in the same transaction that stamps the Salesforce ids, so
+	// the request and the rows can never disagree about whether the write
+	// happened. Set only by the deferred-write consumer.
+	CompletesSalesforceWriteRequestID string
+	// AdoptProjectContactID, when set, is the project_contact row a deferred
+	// write committed with NULL ids, which this upsert must stamp rather
+	// than match afresh. The deferred row sits under the project's account;
+	// Salesforce may place the contact on another account (a partner's), in
+	// which case the ordinary (account, user) and (project, account_contact)
+	// lookups would miss the row and insert a second membership. With this
+	// set, the row's account_contact is moved to the resolved account and
+	// the row itself is updated in place. Set only by the deferred-write
+	// completion.
+	AdoptProjectContactID string // CancelsSalesforceWriteRequestID, when set, is the salesforce_write_request
+	// row a local-only deactivation closes as CANCELLED in the same
+	// transaction: the row was FAILED or never published, so there is no
+	// Salesforce half to undo and nothing may pick the request up later.
+	CancelsSalesforceWriteRequestID string
 }
 
 // SalesforceMembershipUpsertResult reports what the upsert resolved or created.
@@ -958,6 +985,9 @@ type SalesforceMembershipUpsertResult struct {
 	// carries the project ADMIN role (or the contact's Salesforce isCsAdmin
 	// flag is set), which is exactly when AdminRoleName is held.
 	IsAccountAdmin bool
+	// SalesforceWriteRequestID is the id of the salesforce_write_request row
+	// written for DeferredSalesforceWrite, "" when the write was not deferred.
+	SalesforceWriteRequestID string
 }
 
 // SalesforceContactUpsert is the Contact writer's input: one Salesforce
@@ -1049,6 +1079,12 @@ type ProjectMembership struct {
 	// ("Portal user", "Admin", ...), exactly as they were written to
 	// Salesforce — not the derived project_role/project_group values.
 	Roles []string `json:"roles"`
+	// SalesforceSync is "" when the membership is in Salesforce, PENDING
+	// while its Salesforce write is still owed (sales-entity-service was
+	// unavailable at invitation time and the write was deferred), FAILED
+	// when that deferred write gave up. MembershipSfID and ContactSfID are
+	// empty while it is PENDING or FAILED.
+	SalesforceSync string `json:"salesforceSync,omitempty"`
 }
 
 // CreateProjectMembershipRequest is the body of POST /projects/{id}/contacts:
@@ -4969,6 +5005,10 @@ type ProjectContact struct {
 	// happen on genuine customer rows, not only on integration/system accounts.
 	CustomerContactPresent bool `json:"customerContactPresent"`
 	GrantsCaseAccess       bool `json:"grantsCaseAccess"`
+	// SalesforceSync is omitted for a membership that is in Salesforce;
+	// PENDING while a deferred Salesforce write is still owed for it,
+	// FAILED when that write gave up (see domain.SalesforceWriteRequest).
+	SalesforceSync *string `json:"salesforceSync,omitempty"`
 }
 
 // SearchProjectContactsRequest is the input for POST /projects/{id}/contacts/search.
@@ -5133,8 +5173,8 @@ type PatchChangeRequestRequest struct {
 	// ImplementationDeviation sets the "Deviation from the implementation plan"
 	// (see ChangeRequest.ImplementationDeviation). nil leaves it unchanged; a
 	// blank value -- no text once its markup is removed, so "<p><br></p>" too --
-	// clears it (a plain *string, not the pointer-to-pointer below:
-	// encoding/json decodes an explicit null as omitted). It is not one of the
+	// clears it (a plain *string: an explicit null is read as omitted, unlike
+	// the pointer-to-pointer fields below). It is not one of the
 	// approved lock's fields: it is recorded in implement, review and
 	// customer_review. Before implementation a change is a 400
 	// change_request_deviation_not_yet (in new, clearing one a clone carried over
@@ -5155,25 +5195,33 @@ type PatchChangeRequestRequest struct {
 	//   - nil outer pointer: field omitted -- leave the value unchanged
 	//   - non-nil outer, nil inner: explicit null -- clear the value
 	//   - non-nil outer, non-nil inner: set the value
+	// On the wire an explicit null reaches the struct as the second state
+	// through PatchChangeRequestRequest.UnmarshalJSON
+	// (change_request_patch_json.go): encoding/json alone reads a null as an
+	// omitted field. The tags carry omitempty so a marshalled request (the
+	// write-back failure record) reads back the same way.
 	// DeploymentProductIDs uses a single pointer instead: nil
-	// means omitted, and any non-nil slice (including an explicitly empty one)
-	// replaces the whole list -- the same convention CreateIncidentRequest's
-	// WatchList already uses, since an array field has no separate "null" state
-	// worth distinguishing from "empty".
-	ImplementationPlan     **string                `json:"implementationPlan"`
-	Priority               **ChangeRequestPriority `json:"priority"`
-	Category               **ChangeRequestCategory `json:"category"`
-	RequestedByID          **string                `json:"requestedById"`
-	AffectedServicesText   **string                `json:"affectedServicesText"`
-	AffectedComponentsText **string                `json:"affectedComponentsText"`
+	// means omitted (a null too), and any non-nil slice (including an explicitly
+	// empty one) replaces the whole list -- the same convention
+	// CreateIncidentRequest's WatchList already uses, since an array field has
+	// no separate "null" state worth distinguishing from "empty".
+	ImplementationPlan **string `json:"implementationPlan,omitempty"`
+	// Priority is critical, high, moderate or low. Anything else is a 400,
+	// planning included: rows migrated from the previous system can read back
+	// "planning" (its priority 5), but it is not a value this API sets.
+	Priority               **ChangeRequestPriority `json:"priority,omitempty"`
+	Category               **ChangeRequestCategory `json:"category,omitempty"`
+	RequestedByID          **string                `json:"requestedById,omitempty"`
+	AffectedServicesText   **string                `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText **string                `json:"affectedComponentsText,omitempty"`
 	// RollbackDurationText is a raw, unvalidated string (e.g. "2 hours");
 	// parsing or normalizing it is a decision for the layer above, not this one.
-	RollbackDurationText **string  `json:"rollbackDurationText"`
-	DeploymentProductIDs *[]string `json:"deploymentProductIds"`
+	RollbackDurationText **string  `json:"rollbackDurationText,omitempty"`
+	DeploymentProductIDs *[]string `json:"deploymentProductIds,omitempty"`
 	// CustomerGroupID and EnvironmentIDs are NO LONGER ACCEPTED (any value,
 	// null included, is a 400); see CreateChangeRequestRequest.
-	CustomerGroupID **string  `json:"customerGroupId"`
-	EnvironmentIDs  *[]string `json:"environmentIds"`
+	CustomerGroupID **string  `json:"customerGroupId,omitempty"`
+	EnvironmentIDs  *[]string `json:"environmentIds,omitempty"`
 	// DeploymentIDs replaces the whole list of the project's deployments the
 	// change touches (an explicitly empty array clears it, and with it the
 	// deployment products that follow from it). Together
@@ -5185,7 +5233,7 @@ type PatchChangeRequestRequest struct {
 	// Changing ProjectID while deployments are stored requires DeploymentIDs
 	// in the same request. Cannot be combined with the single DeploymentID /
 	// DeployedProductID fields. PostgreSQL data source only.
-	DeploymentIDs *[]string `json:"deploymentIds"`
+	DeploymentIDs *[]string `json:"deploymentIds,omitempty"`
 	// Comment and WorkNote append a new journal entry (the customer-visible
 	// "Additional comments" and the internal "Work notes"); they reject an
 	// empty or whitespace-only value, and neither can be used to clear anything.
@@ -5195,7 +5243,7 @@ type PatchChangeRequestRequest struct {
 	// only when it exactly matches the effective planned window: PlannedStartOn
 	// if provided in this same request, else the change request's stored start,
 	// and likewise for the end. See CreateChangeRequestRequest.DurationInput.
-	DurationInput **int `json:"durationInput"`
+	DurationInput **int `json:"durationInput,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.

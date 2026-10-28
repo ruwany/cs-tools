@@ -212,6 +212,190 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /customer-engagements/allocations/search:
+    post:
+      summary: Search customer engagement allocations.
+      description: >
+        Read-only, internal staff only. One page of allocations with their
+        engagement, account and engineer, filtered, sorted (default: newest
+        `startDate` first) and counted. `limit` defaults to 20, at most 50.
+        Registered only when a database pool is configured.
+      operationId: searchEngagementAllocations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchEngagementAllocationsRequest'
+      responses:
+        "200":
+          description: One page of allocations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchEngagementAllocationsResponse'
+        "400":
+          description: Bad request (unknown field, malformed id, date or state, limit above 50).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /customer-engagements/allocations/{id}:
+    get:
+      summary: One customer engagement allocation.
+      description: Read-only, internal staff only.
+      operationId: getEngagementAllocation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationView'
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /customer-engagements/allocations/{id}/updates:
+    get:
+      summary: The status updates written against an allocation, newest first.
+      description: Read-only, internal staff only. `limit` defaults to 20, at most 50.
+      operationId: listEngagementAllocationUpdates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: One page of updates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEngagementAllocationUpdatesResponse'
+        "400":
+          description: Bad id, limit or offset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Post a status update on an allocation, as the engineer allocated.
+      description: >
+        Only the engineer the allocation is for may post: the caller's email
+        (from the user token) is resolved to the platform user record and that
+        id must equal the allocation's engineer. The server sets the author,
+        and stores the update as PUBLISHED, INTERNAL, INDIVIDUAL, WEEKLY, with
+        the Monday (UTC) of the current week as `cycleStartDate`. No
+        notification is sent. `subject` is required, at most 512 characters;
+        `content` is required, at most 8000.
+      operationId: createEngagementAllocationUpdate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEngagementAllocationUpdateRequest'
+      responses:
+        "201":
+          description: The stored update.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationUpdate'
+        "400":
+          description: Missing or too long subject or content, or a bad id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not the engineer allocated, or not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /onboarding-steps/search:
     post:
       summary: >-
@@ -2052,6 +2236,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /autoclosure/candidates:
+    post:
+      summary: >-
+        List the tickets (Awaiting Info / Solution Proposed, case and security
+        report analysis, no open child, not on hold, auto-closure enabled) that
+        are due for one stage of the auto-closure workflow, oldest reference
+        time first. Internal callers only. Registered only when
+        AUTOCLOSURE_SYSTEM_USER_EMAIL is set. Backs operations/csm-scheduled-tasks.
+      operationId: findAutoclosureCandidates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoclosureCandidatesRequest'
+      responses:
+        "200":
+          description: The tickets due for the stage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoclosureCandidatesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            Case auto-closure is not available on this entity-service: the system
+            user (AUTOCLOSURE_SYSTEM_USER_EMAIL) is not configured, or the data
+            source is servicenow. The message says which.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /autoclosure/cases/{id}/advance:
+    post:
+      summary: >-
+        Perform one auto-closure stage on one ticket if it is still due:
+        post the reminder (or closure) comment as the system user, move the
+        workflow step and time, and for the closure stage close the ticket.
+        Idempotent: a ticket that is no longer due, or that another run handled
+        first, answers outcome "skipped" and nothing is written. Internal
+        callers only.
+      operationId: advanceAutoclosure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoclosureAdvanceRequest'
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoclosureAdvanceResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            Case auto-closure is not available on this entity-service: the system
+            user (AUTOCLOSURE_SYSTEM_USER_EMAIL) is not configured, or the data
+            source is servicenow. The message says which.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /scheduled-tasks/attempts:
     post:
       summary: >-
@@ -3648,9 +3938,14 @@ paths:
         Adds a contact to the project: state INVITED (RE-INVITED when a previously
         deactivated membership is being brought back) in both the CSM database and
         Salesforce, and publishes project_contact.invited so the invitation e-mail is
-        sent. The database transaction and the Salesforce write succeed together or
-        neither is applied and this call returns an error; the database commits last,
-        because it is the only participant that can be rolled back.
+        sent. On the ordinary path the database transaction and the Salesforce write
+        succeed together or neither is applied and this call returns an error; the
+        database commits last, because it is the only participant that can be rolled
+        back. With SALESFORCE_DEFERRED_WRITES_ENABLED and sales-entity-service
+        unavailable, a FIRST invitation is instead committed to the database alone and
+        the Salesforce write is deferred: the 201 body then carries salesforceSync
+        PENDING and empty Salesforce ids, and 201 is not proof that Salesforce has
+        the membership yet.
 
 
         Postgres data source only, and registered only when
@@ -3675,7 +3970,11 @@ paths:
               $ref: '#/components/schemas/CreateProjectMembershipRequest'
       responses:
         '201':
-          description: The membership that was created.
+          description: >
+            The membership that was created. With SALESFORCE_DEFERRED_WRITES_ENABLED and
+            sales-entity-service unavailable, a first invitation is still created: the body then
+            carries salesforceSync PENDING and empty Salesforce ids, and the write to Salesforce
+            (and the invitation e-mail that follows it) happens asynchronously.
           content:
             application/json:
               schema:
@@ -3714,7 +4013,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: Salesforce is unavailable, or the change could not be saved.
+          description: >
+            Salesforce is unavailable (and the invitation could not be deferred: deferral is off,
+            or this is a re-invitation), or the change could not be saved.
           content:
             application/json:
               schema:
@@ -3850,6 +4151,10 @@ paths:
             The membership is neither INVITED nor RE-INVITED, so there is no outstanding
             invitation to re-send; or the membership or its contact has no Salesforce id yet
             (a generic "please contact WSO2 support" message; the missing id is logged, not returned).
+            With deferred Salesforce writes, errorCode salesforce_sync_pending means the
+            invitation's Salesforce write is still in progress (try again later) and
+            salesforce_sync_failed means it failed or was never handed over (remove the
+            contact and invite again).
           content:
             application/json:
               schema:
@@ -3993,7 +4298,10 @@ paths:
           description: >
             The project, its account, the membership or its contact has no Salesforce id
             yet (a generic "please contact WSO2 support" message; the missing id is logged,
-            not returned). Nothing is written to either system.
+            not returned). Nothing is written to either system. With deferred Salesforce
+            writes, errorCode salesforce_sync_pending means the invitation's Salesforce write
+            is still in progress (try again later) and, for a role change, salesforce_sync_failed
+            means it failed or was never handed over (remove the contact and invite again).
           content:
             application/json:
               schema:
@@ -4067,7 +4375,11 @@ paths:
           description: >
             The project, its account, the membership or its contact has no Salesforce id
             yet (a generic "please contact WSO2 support" message; the missing id is logged,
-            not returned). Nothing is written to either system.
+            not returned). Nothing is written to either system. With deferred Salesforce
+            writes, errorCode salesforce_sync_pending means the invitation's Salesforce write
+            is still in progress (try again later). A contact whose deferred write failed or
+            was never handed over is NOT refused: it is deactivated locally, the pending write
+            is cancelled, and this operation returns 204.
           content:
             application/json:
               schema:
@@ -17958,6 +18270,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "400":
+          description: Malformed (non-UUID) id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
           content:
@@ -17989,6 +18307,12 @@ paths:
                 type: object
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such article, or it is not in draft state.
           content:
             application/json:
               schema:
@@ -18061,6 +18385,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such article.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
           content:
@@ -18086,6 +18416,12 @@ paths:
             application/json:
               schema:
                 type: object
+        "400":
+          description: Malformed (non-UUID) id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
           content:
@@ -18169,6 +18505,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such knowledge base.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
           content:
@@ -18202,6 +18544,12 @@ paths:
                 type: object
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such knowledge base.
           content:
             application/json:
               schema:
@@ -18380,6 +18728,632 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /skills/levels:
+    get:
+      summary: The skill level scales and their levels.
+      description: >
+        Every level scale (level type) with its levels in value order. A skill is rated on one scale, and a person
+        may only hold a level of that skill's scale. Any internal caller.
+      operationId: getSkillLevels
+      responses:
+        "200":
+          description: "The scales."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillLevelTypesResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/categories:
+    get:
+      summary: The skill category tree, flat.
+      description: >
+        Every category with its parent, so a client can build the tree. Skills are filed under lowest-level
+        categories. Any internal caller.
+      operationId: getSkillCategories
+      responses:
+        "200":
+          description: "The categories."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategoriesResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/search:
+    post:
+      summary: Search the skill catalogue.
+      description: >
+        The read-only catalogue ("All Skills"), paged and filtered in SQL. Filters combine with AND; inactive skills
+        are left out unless includeInactive is set. A category filter includes that category's descendants.
+        Ordered by name. Default limit 50, at most 200. Any internal caller.
+      operationId: searchSkills
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillsRequest'
+      responses:
+        "200":
+          description: "A page of skills."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSkillsResponse'
+        "400":
+          description: "Bad request: a malformed id or a limit above 200."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills:
+    post:
+      summary: Create a skill.
+      description: >
+        CSM admin only: a token role listed in AUTH_ADMIN_ROLES. The skill needs a level scale and may be filed under
+        categories. Names are unique ignoring case. Created active unless active is false.
+      operationId: createSkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequest'
+      responses:
+        "201":
+          description: "The skill."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: "Bad request: a missing or over-long name, or a level scale or category that does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not a CSM admin."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Another skill already has this name."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/{id}:
+    get:
+      summary: Read one skill.
+      description: >
+        Any internal caller.
+      operationId: getSkill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The skill id.
+      responses:
+        "200":
+          description: "The skill."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: "Bad request: the id is not a UUID."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such skill, or the skills routes are not registered."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Edit or deactivate a skill.
+      description: >
+        CSM admin only. Fields left out are unchanged; description and keywords are cleared with an empty string;
+        categoryIds replaces the category links as a whole. active=false deactivates: the skill stays in the catalogue
+        and on the profiles that hold it, and can no longer be added. The level scale cannot change while any person
+        holds a level of the skill (409).
+      operationId: updateSkill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The skill id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillRequest'
+      responses:
+        "200":
+          description: "The skill as it now stands."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: "Bad request: nothing to change, a malformed value, or a level scale or category that does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not a CSM admin."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such skill, or the skills routes are not registered."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Another skill has this name, or people hold levels of this skill so its scale cannot change."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/me:
+    get:
+      summary: The caller's own skills profile.
+      description: >
+        The active skills of the caller's own user (resolved from the token's email, never from the request), with level,
+        category and whether the row is inherited from a group. Not paged. Needs a user token.
+      operationId: getMySkills
+      responses:
+        "200":
+          description: "The profile."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MySkillsResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller, no user token, or no active internal user record."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add a skill to the caller's profile.
+      description: >
+        Adds the skill at the given level and records the first-set in the history. The level must belong to the skill's
+        level scale (400). The skill must be active (409), must not already be on the profile (409, change its level
+        instead) and must not be an inherited row (409). Never creates a second row for a skill already held.
+      operationId: addMySkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMySkillRequest'
+      responses:
+        "201":
+          description: "The profile entry."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkill'
+        "400":
+          description: "Bad request: a missing or malformed id, or a level that is not on the skill's scale."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller, no user token, or no active internal user record."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such skill, or the skills routes are not registered."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "The skill is inactive, already on the profile, inherited, or has no level scale."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/me/history:
+    get:
+      summary: The caller's skill level history.
+      description: >
+        Every level change on the caller's profile, newest first: levelFrom is null for the first time a skill was set,
+        levelTo is null for a removal. Optionally for one skill. Default limit 20, at most 100.
+      operationId: getMySkillHistory
+      parameters:
+        - name: skillId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Only this skill.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Page size.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Zero-based offset.
+      responses:
+        "200":
+          description: "A page of history."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillHistoryResponse'
+        "400":
+          description: "Bad request: a malformed id or number, or a limit above 100."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller, no user token, or no active internal user record."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/me/{skillId}:
+    put:
+      summary: Change the level of a skill on the caller's profile.
+      description: >
+        The level must belong to the skill's level scale (400). Records the change in the history; setting the level
+        already held changes nothing and records nothing. An inherited row is not changed (409).
+      operationId: setMySkillLevel
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The skill id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMySkillLevelRequest'
+      responses:
+        "200":
+          description: "The profile entry as it now stands."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkill'
+        "400":
+          description: "Bad request: a missing or malformed id, or a level that is not on the skill's scale."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller, no user token, or no active internal user record."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "The skill is not on the caller's profile, or the skills routes are not registered."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "The row is inherited from a group, or the skill has no level scale."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Remove a skill from the caller's profile.
+      description: >
+        Deletes the caller's own row and records the removal in the history (levelTo null). An inherited row is not
+        removed (409).
+      operationId: removeMySkill
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The skill id.
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: "Bad request: the id is not a UUID."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not an internal caller, no user token, or no active internal user record."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "The skill is not on the caller's profile, or the skills routes are not registered."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "The row is inherited from a group."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/users/search:
+    post:
+      summary: Everybody's skills (skill manager).
+      description: >
+        A CSM admin (a token role listed in AUTH_ADMIN_ROLES) or a lead of a CRE or SRE team. One row is one person's one
+        active skill; a row must satisfy every filter given. Lists active internal staff and active skills only.
+        Filters are applied in SQL. Ordered by person then skill. Default limit 50, at most 200.
+      operationId: searchUserSkills
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchUserSkillsRequest'
+      responses:
+        "200":
+          description: "A page of person-skill rows."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchUserSkillsResponse'
+        "400":
+          description: "Bad request: a malformed id, a negative minLevelValue or a limit above 200."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Not a CSM admin or a CRE or SRE team lead, or no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 components:
   securitySchemes:
@@ -20462,6 +21436,14 @@ components:
             restatement of `customerContactPresent` — a row invited under one address but
             linked to a contact whose own address differs is invisible to both people, and
             that does happen on genuine customer rows.
+        salesforceSync:
+          type: string
+          enum: [PENDING, FAILED]
+          description: >
+            Omitted for a membership that is in Salesforce. PENDING while the invitation's
+            Salesforce write is still owed (it was deferred because sales-entity-service was
+            unavailable and the command was handed over); FAILED when that deferred write gave
+            up or the command was never handed over. See ProjectMembership.salesforceSync.
 
     CreateProjectMembershipRequest:
       type: object
@@ -20579,10 +21561,25 @@ components:
           format: uuid
         membershipSfId:
           type: string
-          description: The Salesforce Project_Contact__c Id, the key of the onboarding ledger.
+          description: >
+            The Salesforce Project_Contact__c Id, the key of the onboarding ledger. Empty while
+            salesforceSync is PENDING or FAILED: the Salesforce write has not happened yet.
         contactSfId:
           type: string
-          description: The Salesforce Contact Id.
+          description: The Salesforce Contact Id. Empty while salesforceSync is PENDING or FAILED.
+        salesforceSync:
+          type: string
+          enum: [PENDING, FAILED]
+          description: >
+            Present only when the invitation's Salesforce half was deferred because
+            sales-entity-service was unavailable (SALESFORCE_DEFERRED_WRITES_ENABLED). PENDING:
+            the membership exists in CSM and is queued for Salesforce; the invitation e-mail is
+            sent once that write lands. FAILED: the deferred write gave up (Salesforce refused it
+            or every retry was exhausted, or the command was never handed to sales-entity-service
+            because the publish failed) and needs attention. Role changes, deactivation and
+            resend answer 409 with errorCode salesforce_sync_pending while PENDING; once FAILED,
+            role changes and resend answer 409 salesforce_sync_failed and removal runs locally
+            (DELETE returns 204 and cancels the pending write).
         userId:
           type: string
           format: uuid
@@ -24121,7 +25118,8 @@ components:
               nullable: true
               description: >-
                 On the PostgreSQL data source the stored value in lower case: critical,
-                high, moderate, low or planning. On the data source that talks to the
+                high, moderate, low or planning (planning only on rows migrated from the
+                previous system: a PATCH refuses it). On the data source that talks to the
                 previous system directly, critical, high, moderate or low, or the raw
                 label of any other choice.
             category:
@@ -25094,6 +26092,14 @@ components:
       description: >
         Any combination of fields may be supplied; at least one is required.
         Omitted fields are left unchanged.
+        AN EXPLICIT NULL clears implementationPlan, priority, category, requestedById,
+        affectedServicesText, affectedComponentsText and rollbackDurationText, and counts as a
+        field on its own (`{"implementationPlan": null}` alone is a valid request). On every
+        other field a null is read as omitted, except customerGroupId and environmentIds,
+        where it is refused like any other value. The keys are matched without regard to
+        case, as the struct is decoded; one of these seven fields named twice with different
+        capitalisation is a 400. The data source that talks to the previous system directly
+        forwards a null to it as a null.
         APPROVED CHANGE REQUESTS ARE READ-ONLY (PostgreSQL data source): once a change
         request has been approved -- it is in customer_approval, scheduled, implement,
         review, customer_review, closed or rollback, which it reaches only through its CAB
@@ -25156,18 +26162,20 @@ components:
           description: >-
             The IT service (an id from POST /services/search). An id that refers to no service is
             a 400 ("serviceId does not refer to an existing record"). It cannot be cleared: an
-            explicit null is read as omitted. It does not count as a field on its own: a request
-            that carries nothing but serviceId and serviceOfferingId is a 400 ("at least one field
-            must be provided"). PostgreSQL data source only: the data source that talks to the
-            previous system directly ignores it, and it is not mirrored to the previous system.
+            explicit null is read as omitted. It is a field on its own: a request that carries
+            only serviceId is a valid request. PostgreSQL data source only: it is not mirrored to
+            the previous system (a request that carries nothing else the previous system takes is
+            not sent to it at all). The data source that talks to the previous system directly
+            cannot send it: sent with a field it does send, it is not written; sent with nothing
+            else, it is a 400 naming it.
         serviceOfferingId:
           type: string
           format: uuid
           description: >-
             The service offering (an id from POST /service-offerings/search). It is not checked
             against serviceId. An id that refers to no offering is a 400 ("serviceOfferingId does
-            not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it
-            does not count as a field on its own, and it is PostgreSQL data source only.
+            not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it is
+            a field on its own, and it is PostgreSQL data source only.
         assignedEngineerId:
           type: string
           format: uuid
@@ -25339,9 +26347,13 @@ components:
             before changing its state") unless it also sends onHold false. confirmCustomerUpdatedDate
             is refused with the same 400, and a customer's proposed implementation time with a 409
             (errorCode change_request_on_hold); other requests are not affected. Not under the
-            approved-content lock. PostgreSQL data source only: the data source that talks to the
-            previous system directly ignores it (sent with nothing else it is a 400 "at least one
-            field must be provided" there), and it is not mirrored to the previous system.
+            approved-content lock. PostgreSQL data source only: it is not mirrored to the previous
+            system (a request that carries nothing else the previous system takes, such as
+            onHold with onHoldReason, is not sent to it at all, so no write-back failure is
+            recorded). The data source that talks to the previous system directly cannot send it:
+            sent with a field it does send, it is not written; sent with nothing else, it is a 400
+            naming every such field the request carries (onHold, onHoldReason, serviceId,
+            serviceOfferingId).
         onHoldReason:
           type: string
           description: >-
@@ -25389,9 +26401,10 @@ components:
             PostgreSQL data source only.
         implementationPlan:
           type: string
+          nullable: true
           description: >-
             The implementation plan (rich text, stored as sent). An empty string empties it; an
-            explicit null is read as omitted (it does not clear the field).
+            explicit null clears it (the detail then reads null).
         implementationDeviation:
           type: string
           description: >-
@@ -25411,50 +26424,54 @@ components:
             mirrored to the previous system.
         priority:
           type: string
+          nullable: true
           enum: [critical, high, moderate, low]
           description: >-
-            An explicit null is read as omitted, so the priority cannot be cleared through this
-            API.
+            Any other value is a 400 ("priority contains invalid value: ..."), planning included:
+            a change request migrated from the previous system can read back planning (its
+            priority 5), but it is not a value this API sets, so it is refused even when it is
+            the stored value. An explicit null clears the priority.
         category:
           type: string
           enum: [hardware, software, service, system_software, applications_software,
                  network, telecom, documentation, other, regular_release_cloud,
                  hotfix_release_cloud, devops, cloud_computing]
+          nullable: true
           description: >-
-            An explicit null is read as omitted, so the category cannot be cleared through this
-            API.
+            An explicit null clears the category.
         requestedById:
           type: string
           format: uuid
+          nullable: true
           description: >-
-            The requester (a user id). An explicit null is read as omitted, so the requester
-            cannot be cleared through this API. Once the change request has left new, a
+            The requester (a user id). An explicit null clears it. Once the change request has
+            left new, a
             different requester is a 400 when a customer approval or review still ahead would
             then have nobody on the project to ask (the requester never approves their own
             change).
         affectedServicesText:
           type: string
+          nullable: true
           description: >-
-            Free text. An empty string empties it; an explicit null is read as omitted (it does
-            not clear the field).
+            Free text. An empty string empties it; an explicit null clears it.
         affectedComponentsText:
           type: string
+          nullable: true
           description: >-
-            Free text. An empty string empties it; an explicit null is read as omitted (it does
-            not clear the field).
+            Free text. An empty string empties it; an explicit null clears it.
         rollbackDurationText:
           type: string
+          nullable: true
           description: >-
-            Raw, unvalidated free text. An empty string empties it; an explicit null is read as
-            omitted (it does not clear the field).
+            Raw, unvalidated free text. An empty string empties it; an explicit null clears it.
         customerGroupId:
           type: string
           format: uuid
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED: any value but null is a 400 (`customerGroupId is no longer
+            NO LONGER ACCEPTED: any value, null included, is a 400 (`customerGroupId is no longer
             accepted: the customer group is derived from the customer project's registered
-            contacts`); an explicit null is read as omitted. The Customer Group is read-only:
+            contacts`). The Customer Group is read-only:
             it is derived from the registered contacts of the change request's project.
         deploymentIds:
           type: array
@@ -25483,9 +26500,8 @@ components:
             type: string
             format: uuid
           description: >-
-            NO LONGER SUPPORTED. Any value but null (an empty array included) is a 400
-            `environmentIds is no longer supported: deployments carry the environment`; an
-            explicit null is read as omitted.
+            NO LONGER SUPPORTED. Any value, null and an empty array included, is a 400
+            `environmentIds is no longer supported: deployments carry the environment`.
         deploymentProductIds:
           type: array
           maxItems: 100
@@ -25508,12 +26524,13 @@ components:
             type `work_note`). Cannot be empty and cannot clear anything.
         durationInput:
           type: integer
+          nullable: true
           minimum: 0
           description: >-
             Calendar duration in whole seconds. The PostgreSQL data sources refuse any value (400
-            "durationInput is not supported on this data source"). The data source that talks to
-            the previous system directly forwards it as sent, without checking it against the
-            planned window; a negative value is a 400. An explicit null is read as omitted.
+            "durationInput is not supported on this data source"), null included. The data source
+            that talks to the previous system directly forwards it as sent, without checking it
+            against the planned window, and forwards a null as a null; a negative value is a 400.
 
     PatchChangeRequestResponse:
       type: object
@@ -27018,6 +28035,118 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ScheduleEngagementAllocation' }
         count: { type: integer }
+    SearchEngagementAllocationsRequest:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            limit: { type: integer, description: Defaults to 20; at most 50. }
+            offset: { type: integer }
+        filters:
+          type: object
+          properties:
+            searchQuery: { type: string, description: "Matches the allocation reference, engagement name and engagement display id." }
+            accountId: { type: string, format: uuid }
+            accountName: { type: string, description: Substring match. }
+            engineerId: { type: string, format: uuid, description: Platform user id of the allocated engineer. }
+            engagementId: { type: string, format: uuid }
+            states:
+              type: array
+              items: { type: string, description: An allocation state such as CONFIRMED. }
+            from: { type: string, format: date, description: Keep allocations ending on or after this date. }
+            to: { type: string, format: date, description: Keep allocations starting on or before this date. }
+        sortBy:
+          type: object
+          properties:
+            field: { type: string, enum: [startDate, endDate, state, allocationId, accountName, engineerName, utilization] }
+            order: { type: string, enum: [asc, desc] }
+    EngagementAllocationPerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+    EngagementAllocationView:
+      type: object
+      required: [id, engagement]
+      properties:
+        id: { type: string, format: uuid }
+        allocationId: { type: string, description: Human-readable reference. }
+        state: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        startTime: { type: string, description: "Wall-clock time in `timezone`, e.g. 09:00:00." }
+        endTime: { type: string }
+        timezone: { type: string }
+        utilization: { type: number }
+        engagement:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+            displayId: { type: string }
+            name: { type: string }
+            type: { type: string }
+            modeOfDelivery: { type: string }
+            state: { type: string }
+            businessUnit: { type: string }
+            isPaid: { type: boolean }
+            projectId: { type: string, format: uuid }
+            plannedStartDate: { type: string, format: date }
+            plannedEndDate: { type: string, format: date }
+            actualStartDate: { type: string, format: date }
+            actualEndDate: { type: string, format: date }
+        account:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        engineer: { $ref: '#/components/schemas/EngagementAllocationPerson' }
+        latestUpdateDate: { type: string, format: date-time }
+    SearchEngagementAllocationsResponse:
+      type: object
+      required: [allocations, total, limit, offset, hasMore]
+      properties:
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/EngagementAllocationView' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+    EngagementAllocationUpdate:
+      type: object
+      required: [id, createdOn]
+      properties:
+        id: { type: string, format: uuid }
+        subject: { type: string }
+        content: { type: string }
+        state: { type: string, enum: [DRAFT, PUBLISHED, CANCELLED] }
+        visibility: { type: string, enum: [INTERNAL, CUSTOMER] }
+        cycleStartDate: { type: string, format: date }
+        publishedDate: { type: string, format: date-time }
+        createdOn: { type: string, format: date-time }
+        author: { $ref: '#/components/schemas/EngagementAllocationPerson' }
+    ListEngagementAllocationUpdatesResponse:
+      type: object
+      required: [updates, total, limit, offset, hasMore]
+      properties:
+        updates:
+          type: array
+          items: { $ref: '#/components/schemas/EngagementAllocationUpdate' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+    CreateEngagementAllocationUpdateRequest:
+      type: object
+      required: [subject, content]
+      properties:
+        subject: { type: string, maxLength: 512 }
+        content: { type: string, maxLength: 8000 }
     TeamMembersResponse:
       type: object
       required: [members, count]
@@ -35424,6 +36553,126 @@ components:
           format: date-time
           nullable: true
 
+    AutoclosureStage:
+      type: string
+      enum: [release_hold, first_reminder, second_reminder, close]
+    AutoclosureCandidatesRequest:
+      type: object
+      required: [stage]
+      additionalProperties: false
+      properties:
+        stage:
+          $ref: '#/components/schemas/AutoclosureStage'
+        intervalDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Calendar days a ticket must have waited (default 7). Ignored for release_hold.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          description: Most tickets returned, oldest reference time first (default 500).
+        dailyLimit:
+          type: integer
+          minimum: 0
+          description: >-
+            Caps reminders and closures per UTC day across the three stages;
+            what was already advanced today is subtracted, so a retried run
+            cannot exceed it. Hold releases are not counted. 0 = no cap.
+        states:
+          type: array
+          items:
+            type: string
+            enum: [awaiting_info, solution_proposed]
+          description: Narrows the eligible states; empty means both.
+    AutoclosureCandidate:
+      type: object
+      required: [id, number, state, referenceTime]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        state:
+          type: string
+          enum: [awaiting_info, solution_proposed]
+        step:
+          type: string
+          description: Workflow position now; absent when none was ever set.
+        referenceTime:
+          type: string
+          format: date-time
+    AutoclosureCandidatesResponse:
+      type: object
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutoclosureCandidate'
+        quarantined:
+          type: integer
+          description: >-
+            Tickets this stage left out because they failed it repeatedly (3
+            FAILED events in 7 days). Due, but not retried until those failures
+            age out.
+    AutoclosureAdvanceRequest:
+      type: object
+      required: [stage]
+      additionalProperties: false
+      properties:
+        stage:
+          $ref: '#/components/schemas/AutoclosureStage'
+        intervalDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        states:
+          type: array
+          items:
+            type: string
+            enum: [awaiting_info, solution_proposed]
+        templates:
+          type: object
+          additionalProperties:
+            type: string
+          description: >-
+            Comment text overrides keyed "<state>.<kind>" (awaiting_info or
+            solution_proposed, then first_reminder, second_reminder or closure).
+        dailyLimit:
+          type: integer
+          minimum: 0
+          description: >-
+            The per-UTC-day budget of reminders and closures, checked again
+            right before the ticket is claimed (hold releases are exempt). 0 or
+            absent means no cap. Up to one in-flight ticket per concurrent run
+            can still pass it.
+        dryRun:
+          type: boolean
+          description: >-
+            Decide (still due? within the limit?) and record a DRY_RUN audit
+            row, but post nothing, claim nothing and close nothing. The answer
+            is outcome "dry_run" when the ticket would have been advanced.
+    AutoclosureAdvanceResponse:
+      type: object
+      required: [caseId, stage, outcome]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        stage:
+          $ref: '#/components/schemas/AutoclosureStage'
+        outcome:
+          type: string
+          enum: [advanced, skipped, dry_run]
+        reason:
+          type: string
+        fromStep:
+          type: string
+        toStep:
+          type: string
     ClaimScheduledTaskRunRequest:
       type: object
       required: [taskName, periodKey]
@@ -37033,3 +38282,229 @@ components:
         failure:
           type: string
           description: Why it could not be landed. Required and must not be empty.
+
+    SkillLevel:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        value: {type: integer, nullable: true, description: "Orders the levels of a scale (for example 20, 50, 100)."}
+        description: {type: string, nullable: true}
+        color: {type: string, nullable: true}
+    SkillLevelType:
+      type: object
+      required: [id, name, levels]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        levels:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevel'}
+    SkillLevelTypesResponse:
+      type: object
+      required: [levelTypes]
+      properties:
+        levelTypes:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevelType'}
+    SkillCategory:
+      type: object
+      required: [id, name, isLowestCategory]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        code: {type: string, nullable: true}
+        categoryPath: {type: string, nullable: true}
+        isLowestCategory: {type: boolean}
+        parentId: {type: string, format: uuid, nullable: true}
+    SkillCategoriesResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategory'}
+    SkillCategoryRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        categoryPath: {type: string, nullable: true}
+    Skill:
+      type: object
+      required: [id, name, active, categories, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        keywords: {type: string, nullable: true}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    SearchSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the name or keywords, ignoring case."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Skills filed under any of these categories or their descendants.
+        levelTypeId: {type: string, format: uuid}
+        includeInactive: {type: boolean, description: "Include deactivated skills. Default false."}
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    SkillPagination:
+      type: object
+      properties:
+        limit: {type: integer, description: "Page size. Defaults to the endpoint's default; above its maximum is a 400."}
+        offset: {type: integer, description: "Zero-based offset."}
+    SearchSkillsResponse:
+      type: object
+      required: [skills, total, limit, offset]
+      properties:
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/Skill'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    CreateSkillRequest:
+      type: object
+      required: [name, levelTypeId]
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, nullable: true, maxLength: 4000}
+        keywords: {type: string, nullable: true, maxLength: 500}
+        levelTypeId: {type: string, format: uuid}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+        active: {type: boolean, description: "Defaults to true."}
+    UpdateSkillRequest:
+      type: object
+      description: Fields left out are unchanged. At least one is required.
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, maxLength: 4000, description: "An empty string clears it."}
+        keywords: {type: string, maxLength: 500, description: "An empty string clears it."}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, description: "Refused (409) while anybody holds a level of the skill."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Replaces the category links as a whole; an empty list removes them all.
+    UserSkill:
+      type: object
+      required: [skillId, skillName, skillActive, categories, inherited, updatedOn]
+      properties:
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        skillActive: {type: boolean}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean, description: "True when the row comes from a group; the person cannot change it."}
+        inheritedFromGroupId: {type: string, format: uuid, nullable: true}
+        updatedOn: {type: string, format: date-time}
+    MySkillsResponse:
+      type: object
+      required: [userId, skills]
+      properties:
+        userId: {type: string, format: uuid, description: "The caller's own user id."}
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkill'}
+    AddMySkillRequest:
+      type: object
+      required: [skillId, levelId]
+      properties:
+        skillId: {type: string, format: uuid}
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SetMySkillLevelRequest:
+      type: object
+      required: [levelId]
+      properties:
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SkillHistoryEntry:
+      type: object
+      required: [id, skillId, skillName, changedOn]
+      properties:
+        id: {type: string, format: uuid}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        levelFrom:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null the first time the skill was set.
+        levelTo:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null when the skill was removed.
+        changedBy: {type: string, nullable: true, description: "Who made the change."}
+        changedOn: {type: string, format: date-time}
+    SkillHistoryResponse:
+      type: object
+      required: [history, total, limit, offset]
+      properties:
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/SkillHistoryEntry'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    SearchUserSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the person's name or email, ignoring case."}
+        userIds:
+          type: array
+          items: {type: string, format: uuid}
+        skillIds:
+          type: array
+          items: {type: string, format: uuid}
+        levelIds:
+          type: array
+          items: {type: string, format: uuid}
+        minLevelValue: {type: integer, nullable: true, description: "Rows whose level value is at least this."}
+        teamKeys:
+          type: array
+          items: {type: string}
+          description: People on any of these teams (registry keys).
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    UserSkillRow:
+      type: object
+      required: [userId, teamKeys, skillId, skillName, inherited, updatedOn]
+      properties:
+        userId: {type: string, format: uuid}
+        userName: {type: string, nullable: true}
+        userEmail: {type: string, nullable: true}
+        teamKeys:
+          type: array
+          items: {type: string}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean}
+        updatedOn: {type: string, format: date-time}
+    SearchUserSkillsResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkillRow'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}

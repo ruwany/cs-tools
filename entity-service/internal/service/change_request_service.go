@@ -327,8 +327,16 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	if req.State != nil && !validChangeRequestState[*req.State] {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
 	}
+	// The four priorities the API names. planning is refused although the
+	// enum column holds it (migration 0100, for rows migrated from the previous
+	// system): it is no value of this API, which reads it back but never sets it.
+	// Anything else used to reach the enum cast and fail as a 500.
+	if req.Priority != nil && *req.Priority != nil && !validChangeRequestPriority[**req.Priority] {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(**req.Priority)}
+	}
 	if req.Title == nil && req.Description == nil && req.ProjectID == nil && req.CaseID == nil &&
-		req.DeploymentID == nil && req.DeployedProductID == nil && req.AssignedEngineerID == nil &&
+		req.DeploymentID == nil && req.DeployedProductID == nil && req.ServiceID == nil &&
+		req.ServiceOfferingID == nil && req.AssignedEngineerID == nil &&
 		req.AssignedTeamID == nil && req.PlannedStartOn == nil && req.PlannedEndOn == nil &&
 		req.Impact == nil && req.State == nil && req.Type == nil && req.Justification == nil &&
 		req.ImpactDescription == nil && req.ServiceOutage == nil && req.CommunicationPlan == nil &&
@@ -398,6 +406,14 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	// The deviation from the implementation plan: the previous system's change
 	// request API has no field for it, so it stays PostgreSQL-only.
 	mirrorReq.ImplementationDeviation = nil
+	// The hold and the service have no field in the previous system's PATCH
+	// either (snPatchChangeRequestPayload carries neither, so the mirror never
+	// sent them): they stay PostgreSQL-only too. Stripped here so a PATCH that
+	// carries nothing else is not dispatched at all, rather than refused by the
+	// mirror ("at least one field must be provided") and recorded as a failed
+	// write-back.
+	mirrorReq.OnHold, mirrorReq.OnHoldReason = nil, nil
+	mirrorReq.ServiceID, mirrorReq.ServiceOfferingID = nil, nil
 	// The conversation about a time the customer proposed (confirmCustomerUpdatedDate,
 	// expectedCustomerUpdatedOn) has no field in the previous system's change request API: it stays
 	// PostgreSQL-only. What of it changes the change request itself is mirrored from what

@@ -1071,6 +1071,27 @@ type snPatchChangeRequestPayload struct {
 	WorkNote *string `json:"workNote,omitempty"`
 }
 
+// snUnforwardedChangeRequestPatchFields names the fields of req that
+// snPatchChangeRequestPayload has no field for (serviceId, serviceOfferingId,
+// onHold, onHoldReason), in that order. Sent with a field this data source does
+// forward, they are not written; sent alone, PatchChangeRequest refuses them.
+func snUnforwardedChangeRequestPatchFields(req domain.PatchChangeRequestRequest) []string {
+	var names []string
+	if req.ServiceID != nil {
+		names = append(names, "serviceId")
+	}
+	if req.ServiceOfferingID != nil {
+		names = append(names, "serviceOfferingId")
+	}
+	if req.OnHold != nil {
+		names = append(names, "onHold")
+	}
+	if req.OnHoldReason != nil {
+		names = append(names, "onHoldReason")
+	}
+	return names
+}
+
 // rawJSONOrNull marshals v (or emits the JSON literal null when v is nil) into
 // a json.RawMessage, for building a tri-state PATCH payload field from a
 // **T domain pointer-to-pointer.
@@ -1125,6 +1146,16 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		req.RollbackDurationText == nil &&
 		req.DeploymentProductIDs == nil && req.Comment == nil && req.WorkNote == nil &&
 		req.DurationInput == nil && req.IsPlanningVisibleToCustomers == nil {
+		// The service and the hold have no field in this data source's PATCH
+		// payload. A request that carries nothing else would otherwise go out
+		// empty, so it is refused in words that say why.
+		if unforwarded := snUnforwardedChangeRequestPatchFields(req); len(unforwarded) > 0 {
+			verb := "is"
+			if len(unforwarded) > 1 {
+				verb = "are"
+			}
+			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: strings.Join(unforwarded, ", ") + " " + verb + " not supported on the ServiceNow data source"}
+		}
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 

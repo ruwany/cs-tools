@@ -479,6 +479,11 @@ func main() {
 	// phone) -- needed when reassigning a team lead who has no phone on
 	// file yet (see the /teams/{id}/lead comment above).
 	route("PATCH /users/{id}", handler.PermWrite, usersHandler.UpdateUser)
+	// Admin-only, like POST /users' own grantRoles field (the same
+	// grantableRoles resolution and the same GET /roles/grantable vocabulary)
+	// -- grants a portal permission role to a user who already exists,
+	// instead of only at the moment a new one is created.
+	route("POST /users/{id}/roles", handler.PermAdmin, usersHandler.GrantUserRoles)
 	// Registered unconditionally, even when timecardApproverRoleIDs is empty:
 	// GetTimeCardApprovers itself returns 404 when disabled. Registering it
 	// only when configured would instead let the request fall through to the
@@ -578,6 +583,7 @@ func main() {
 	route("GET /kb-articles/{id}/history", handler.PermView, kbArticleHandler.ListKBArticleHistory)
 	route("POST /deployments/search", handler.PermView, deploymentHandler.SearchDeployments)
 	route("PATCH /deployments/{id}", handler.PermWrite, deploymentHandler.PatchDeployment)
+	route("PUT /deployments/{id}/air-gapped", handler.PermWrite, deploymentHandler.SetDeploymentAirGapped)
 	route("POST /deployments/{id}/products", handler.PermWrite, deploymentHandler.PostDeployedProduct)
 	route("POST /deployments/{id}/products/search", handler.PermView, deploymentHandler.SearchDeployedProducts)
 	route("PATCH /deployments/{deploymentId}/products/{productId}", handler.PermWrite, deploymentHandler.PatchDeployedProduct)
@@ -597,6 +603,16 @@ func main() {
 	// stage's assignment group. A "group" id (from the approvals response), not a
 	// team id; internal staff only (entity-service refuses anyone else).
 	route("GET /groups/{id}", handler.PermView, groupHandler.GetGroup)
+
+	// Customer engagement allocations: the list, one allocation, and the status
+	// updates written against it. Pure pass-through; entity-service restricts all
+	// of it to internal staff and lets only the allocated engineer post an update,
+	// so posting is an ordinary write here with no ownership check of its own.
+	engagementAllocationHandler := handler.NewEngagementAllocationHandler(customerEntityClient)
+	route("POST /engagement-allocations/search", handler.PermView, engagementAllocationHandler.SearchEngagementAllocations)
+	route("GET /engagement-allocations/{id}", handler.PermView, engagementAllocationHandler.GetEngagementAllocation)
+	route("GET /engagement-allocations/{id}/updates", handler.PermView, engagementAllocationHandler.ListEngagementAllocationUpdates)
+	route("POST /engagement-allocations/{id}/updates", handler.PermWrite, engagementAllocationHandler.CreateEngagementAllocationUpdate)
 
 	// Team Schedule. Reads only for now, so everything sits under view: any
 	// role that can see the portal can see who is on the rota. Editing the
@@ -652,6 +668,25 @@ func main() {
 	// named by that family's rota admin, who is no portal admin, so those
 	// routes are PermWrite and entity-service decides.
 	rotaAccessHandler := handler.NewRotaAccessHandler(customerEntityClient)
+	// Skill management: My Skills, the All Skills catalogue, the Skill Manager
+	// and the admin's catalogue edits. The floor here only keeps the control
+	// away from a caller who could not use it at all (PermWrite for every
+	// change); who may add a skill to the catalogue or read everybody's skills
+	// is entity-service's decision, made from the forwarded user token.
+	skillHandler := handler.NewSkillHandler(customerEntityClient)
+	route("GET /skills/levels", handler.PermView, skillHandler.GetSkillLevels)
+	route("GET /skills/categories", handler.PermView, skillHandler.GetSkillCategories)
+	route("POST /skills/search", handler.PermView, skillHandler.SearchSkills)
+	route("GET /skills/me", handler.PermView, skillHandler.GetMySkills)
+	route("GET /skills/me/history", handler.PermView, skillHandler.GetMySkillHistory)
+	route("POST /skills/users/search", handler.PermView, skillHandler.SearchUserSkills)
+	route("GET /skills/{id}", handler.PermView, skillHandler.GetSkill)
+	route("POST /skills", handler.PermWrite, skillHandler.CreateSkill)
+	route("PATCH /skills/{id}", handler.PermWrite, skillHandler.UpdateSkill)
+	route("POST /skills/me", handler.PermWrite, skillHandler.AddMySkill)
+	route("PUT /skills/me/{skillId}", handler.PermWrite, skillHandler.SetMySkillLevel)
+	route("DELETE /skills/me/{skillId}", handler.PermWrite, skillHandler.RemoveMySkill)
+
 	route("GET /team-schedule/rota-access", handler.PermView, rotaAccessHandler.GetRotaAccess)
 	route("PUT /team-schedule/rota-access/admins/{family}/{userId}", handler.PermAdmin, rotaAccessHandler.PutRotaAdmin)
 	route("DELETE /team-schedule/rota-access/admins/{family}/{userId}", handler.PermAdmin, rotaAccessHandler.DeleteRotaAdmin)

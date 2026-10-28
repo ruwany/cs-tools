@@ -1932,7 +1932,11 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		if *req.Priority == nil {
 			crSets = append(crSets, "priority = NULL")
 		} else {
-			addCR("priority = $%d::change_request_priority_enum", strings.ToUpper(string(**req.Priority)))
+			label := strings.ToUpper(string(**req.Priority))
+			if !changeRequestPatchPriorityPGLabels[label] {
+				return "", &apierror.ValidationError{Msg: fmt.Sprintf("priority %q is not a change request priority: use critical, high, moderate or low", **req.Priority)}
+			}
+			addCR("priority = $%d::change_request_priority_enum", label)
 		}
 	}
 	if req.Category != nil {
@@ -3579,6 +3583,14 @@ func callerPendingApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, appr
 		return unknown, unknownKind, nil
 	}
 	return first, firstKind, nil
+}
+
+// changeRequestPatchPriorityPGLabels is what a PATCH may write to
+// change_request_priority_enum: the domain's four priorities. The enum also
+// holds PLANNING (migration 0100, for rows migrated from the previous system),
+// which reads back as "planning" but is no value of this API.
+var changeRequestPatchPriorityPGLabels = map[string]bool{
+	"CRITICAL": true, "HIGH": true, "MODERATE": true, "LOW": true,
 }
 
 // changeRequestCategoryPGLabels is change_request_category_enum's label set
