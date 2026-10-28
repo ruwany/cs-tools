@@ -5510,8 +5510,8 @@ read and create on a database without it (the older build never names it, so the
   carry it; blank markup is none on create, on PATCH, stored, and for Request Approval; a customer's create carrying one is
   refused on both paths and writes nothing; a customer neither reads nor writes it), run as a superuser and as `csm_app`;
   `change_request_service_deviation_test.go` (alone is a patch, never mirrored, the create that calls the previous system
-  first keeps it for PostgreSQL and refuses a customer's before that system is called, the data source that talks to the
-  previous system directly refuses it);
+  first keeps it for PostgreSQL and refuses a customer's before that system is called); `sn_change_request_service_test.go`
+  (the data source that talks to the previous system directly refuses it);
   `TestChangeRequestCreateIsInternalOnly` (server: the route is wrapped in `internalOnly`).
 
 ### Customer Group: approving / rejecting Customer Approval and Customer Review

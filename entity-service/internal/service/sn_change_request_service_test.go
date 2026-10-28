@@ -1447,3 +1447,24 @@ func TestSNChangeRequestService_PatchChangeRequest_RefusesFieldsItCannotSend(t *
 		})
 	}
 }
+
+// The data source that talks to the previous system directly has no field for
+// the deviation, so it refuses it rather than drop it: before anything is sent.
+func TestSNChangeRequestService_RefusesTheDeviation(t *testing.T) {
+	svc := NewServiceNowChangeRequestService(nil)
+	deviation := "<p>Something else was done.</p>"
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	create := validCreateChangeRequestRequest()
+	create.ImplementationDeviation = &deviation
+	_, err := svc.CreateChangeRequest(ctx, create)
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) || ve.Msg != implementationDeviationNotOnServiceNowMsg {
+		t.Errorf("create with a deviation: err = %v, want that data source's refusal", err)
+	}
+
+	_, err = svc.PatchChangeRequest(ctx, testUUID, domain.PatchChangeRequestRequest{ImplementationDeviation: &deviation})
+	if !errors.As(err, &ve) || ve.Msg != implementationDeviationNotOnServiceNowMsg {
+		t.Errorf("PATCH with a deviation: err = %v, want that data source's refusal", err)
+	}
+}
