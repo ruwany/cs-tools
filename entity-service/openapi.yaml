@@ -11452,6 +11452,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not an internal caller, or may not do this.
           content:
@@ -11480,6 +11486,12 @@ paths:
                 $ref: '#/components/schemas/StandardChangeTemplate'
         "400":
           description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
           content:
             application/json:
               schema:
@@ -11523,6 +11535,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not an internal caller, or may not do this.
           content:
@@ -11560,6 +11578,12 @@ paths:
                 $ref: '#/components/schemas/StandardChangeTemplate'
         "400":
           description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
           content:
             application/json:
               schema:
@@ -11608,6 +11632,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not an internal caller, or may not do this.
           content:
@@ -11651,6 +11681,12 @@ paths:
                 $ref: '#/components/schemas/StandardChangeTemplate'
         "400":
           description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
           content:
             application/json:
               schema:
@@ -11757,6 +11793,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not an internal caller, or may not do this.
           content:
@@ -11788,6 +11830,12 @@ paths:
                 $ref: '#/components/schemas/StandardChangeProposal'
         "400":
           description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
           content:
             application/json:
               schema:
@@ -26407,8 +26455,6 @@ components:
 
     CreateChangeRequestRequest:
       type: object
-      required:
-        - type
       properties:
         subject:
           type: string
@@ -26419,7 +26465,7 @@ components:
           type: string
           enum: [standard, normal, emergency]
           description: >-
-            Required. Decides the approval flow: Standard needs no approval
+            Required, except with standardChangeTemplateId (then it defaults to standard). Decides the approval flow: Standard needs no approval
             (Request Approval goes straight to Scheduled); Normal needs peer
             approval then CAB approval; Emergency needs CAB approval only (one
             stage in the CAB Approval group: the previous system has no Emergency CAB). An
