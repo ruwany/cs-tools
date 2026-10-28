@@ -1878,7 +1878,10 @@ export async function installFakeChangeRequestApi(
           const text = body[kind];
           if (typeof text === "string" && text.trim()) journal.push({ kind, text });
         }
-        if (typeof body.implementationPlan === "string") implementationPlan = blankToNull(body.implementationPlan);
+        // An explicit null clears the plan, as in the backend (the deviation's null is read as omitted).
+        if (typeof body.implementationPlan === "string" || body.implementationPlan === null) {
+          implementationPlan = blankToNull(body.implementationPlan);
+        }
         if (typeof body.implementationDeviation === "string") implementationDeviation = deviationBlankToNull(body.implementationDeviation);
         // Checkbox edits: the gate above has refused every one that is not allowed.
         if (typeof body.customerApprovalRequired === "boolean") flags.customerApprovalRequired = body.customerApprovalRequired;
