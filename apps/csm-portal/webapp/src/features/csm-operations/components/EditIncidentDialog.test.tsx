@@ -365,6 +365,7 @@ describe("EditIncidentDialog required-field markers", () => {
     );
 
     pick(/^state$/i, target);
+    expect(screen.getByText(`A resolution is required to move this incident to ${target}.`)).toBeInTheDocument();
     expect(combobox(/^resolution code$/i)).toBeRequired();
     expect(screen.getByRole("textbox", { name: /^resolution notes$/i })).toBeRequired();
     expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
@@ -385,7 +386,7 @@ describe("EditIncidentDialog required-field markers", () => {
     expect(combobox(/^resolution code$/i)).not.toBeRequired();
     expect(screen.getByRole("textbox", { name: /^resolution notes$/i })).not.toBeRequired();
     // Nor does the caption claim a resolution is needed: this save moves nothing.
-    expect(screen.queryByText(/ServiceNow requires a resolution/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A resolution is required/)).not.toBeInTheDocument();
     pick(/^impact$/i, "High");
     expect(screen.getByRole("button", { name: /^save$/i })).not.toBeDisabled();
   });

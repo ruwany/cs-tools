@@ -442,7 +442,7 @@ export default function EditIncidentDialog({
               {/* Said only when this save moves the incident there, like the asterisks below. */}
               {isTransitioningToResolved && (
                 <Typography variant="caption" color="text.secondary">
-                  ServiceNow requires a resolution to move this incident to {incidentStateLabel(state.state)}.
+                  A resolution is required to move this incident to {incidentStateLabel(state.state)}.
                 </Typography>
               )}
               {/* Required only when this save moves the incident INTO Resolved
