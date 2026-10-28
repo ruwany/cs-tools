@@ -5198,7 +5198,7 @@ The rules, in the order they are applied (**the first failing one wins, every re
      as the superuser, as `csm_app` and on a copy whose approval tables have the sync's enum
      columns), `TestNobodyToAskMsg` / `TestAnyContactToAsk` / `TestBoxesTurnedOnAfterNew` (pure),
      the service row in `change_request_service_lock_test.go`.
-8. **Request Approval needs the deviation folded into the plan** (the user's decision, 2026-10-26). `{state: "assess"}` on a
+8. **Request Approval needs the deviation folded into the plan**. `{state: "assess"}` on a
    change still in New (a NULL state counts) is refused while the deviation from the implementation plan in effect -- the
    request's own `implementationDeviation` when it carries the field, else the stored one, both by `IsBlankRichText` (markup
    with no text is none) -- is not blank ->
@@ -6076,9 +6076,8 @@ read, and what comes out is a handful of derived facts, never a row. `legalNextS
 M1a-M10e, and the database-free
 `change_request_proposer_test.go`). The predicate says a time is stored and unanswered; it
 cannot say who wrote it, and the previous system lets WSO2 users write the same column. **The proposal records its proposer**
-(the user's decision, 2026-10-26, which reverses the 2026-10-08 one to store nothing; migration
-`0249_change_request_customer_proposer.sql`): three columns on `change_request`, written by `proposeCustomerTime` in the same
-UPDATE that writes `customer_updated_on`:
+(migration `0249_change_request_customer_proposer.sql`): three columns on `change_request`, written by `proposeCustomerTime` in
+the same UPDATE that writes `customer_updated_on`:
 
 * `customer_proposed_by_user_id` -- the proposing contact's `"user"` id (`REFERENCES "user"(id) ON DELETE SET NULL`, pinned
   from the catalog by `..._TheRecordedUserIsAForeignKeyClearedOnDelete`);

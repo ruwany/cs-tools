@@ -72,12 +72,12 @@ import (
 //
 // WHO PROPOSED is what makes a waiting date a customer's PROPOSAL: the predicate only says a
 // date is stored and unanswered. The proposal records its proposer on change_request itself
-// (migration 0249, the user's decision of 2026-10-26): customer_proposed_by_user_id (the
-// contact), customer_proposed_for (the proposed start the record is about) and
-// customer_proposed_on (when), written in the proposal's own UPDATE. A later write to the
-// change by anybody else (a work note, an additional comment, the hold, any other staff PATCH the
-// approved-content lock lets through, another writer's write to the work item) does not touch
-// them, so the proposal stays recorded as the customer's. The record names the proposer only
+// (migration 0249): customer_proposed_by_user_id (the contact), customer_proposed_for (the
+// proposed start the record is about) and customer_proposed_on (when), written in the
+// proposal's own UPDATE. A later write to the change by anybody else (a work note, an
+// additional comment, the hold, any other staff PATCH the approved-content lock lets through,
+// another writer's write to the work item) does not touch them, so the proposal stays
+// recorded as the customer's. The record names the proposer only
 // while customer_proposed_for is the stored time itself and the contact is still a registered
 // contact of the change's project (resolveProposer, readProposer); entering Customer Approval
 // voids it (the 0249 trigger), and so does a plain Re-schedule, which asks the customers again
