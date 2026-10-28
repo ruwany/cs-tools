@@ -232,14 +232,19 @@ standard asterisk, so the user can see it before they try. One convention, no ha
   It draws MUI's aria-hidden asterisk (`MuiFormLabel-asterisk`) and sets `aria-required`.
 - **A caption the page draws itself** (a rich-text editor's label, a section title over a group): `<RequiredMark />`
   (`@components/RequiredMark`), the same aria-hidden asterisk, plus `ariaRequired` on the `Editor` /
-  `EditorWithSourceToggle` or `required` on `ExpandableRichTextField`.
+  `EditorWithSourceToggle` or `required` on `ExpandableRichTextField`. A caption over a single control also names it:
+  wrap an editor (it takes no `id`) in `role="group" aria-labelledby` the caption's id, or point a plain input's
+  `aria-labelledby` at it. A placeholder is not a name.
 - **Conditional** requirements are marked only while they apply (`required={isTransitioningToResolved}`), and any
   caption that explains them is shown under the same condition.
 - **Needed for a later step, not for saving** (a change request's Assignment group before Request Approval, an
   announcement's description before Submit / Publish): the asterisk plus helper text naming the step ("Required to request
   approval."); saving stays possible. The step itself is what is disabled or refused.
-- None of these pages wrap their fields in a `<form>`, so the native `required` attribute triggers no browser validation;
-  the page's own checks and the backend stay the authority.
+- **Inside a `<form>`**, the native `required` attribute is live: the browser blocks the submit with its own bubble
+  before the page's `onSubmit` runs. So there, either use `required` with `noValidate` on the form (CaseAlertLadderSettings,
+  CaseAlertSettings' room dialog, CaseAlertChatSpaces, PagingPhoneDialog, RotaReminderSettings), or `aria-required` alone
+  (CaseAlertSettings' RouteForm, CellPicker's new-tag form). The MUI fields marked so far sit in no `<form>`, so their
+  `required` triggers no browser validation. Either way the page's own checks and the backend stay the authority.
 - Tests: `getByRole(..., { name })` ignores the aria-hidden asterisk, so names are unchanged; assert `toBeRequired()` (or
   `aria-required="true"` on an editor) and, for a caption, `.MuiFormLabel-asterisk`. e2e page objects match labels with
   `/^X\s*\*?$/`.

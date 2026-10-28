@@ -29,7 +29,10 @@ const { apiMock, details, noResults } = vi.hoisted(() => ({
 }));
 vi.mock("@api/backend/client", () => ({ useBackendApi: () => apiMock }));
 vi.mock("@api/useSearchUsersByName", () => ({ useSearchInternalUsersByName: noResults }));
-vi.mock("@api/useSearchGroups", () => ({ useSearchGroups: noResults }));
+// One assignment group to pick.
+vi.mock("@api/useSearchGroups", () => ({
+  useSearchGroups: () => ({ data: [{ id: "team-2", name: "Platform" }], isFetching: false, isError: false }),
+}));
 vi.mock("@api/useSearchItServices", () => ({ useSearchItServices: noResults }));
 vi.mock("@api/useSearchServiceOfferings", () => ({ useSearchServiceOfferings: noResults }));
 vi.mock("@features/csm-operations/api/useSearchServiceRequestsForSelect", () => ({
@@ -465,5 +468,27 @@ describe("BulkEditChangeRequestsDialog — what Request Approval needs", () => {
     pick(dialog, "Customer approval", "Required");
     expect(project(dialog)).toBeRequired();
     expect(project(dialog)).toHaveAttribute("data-helper-text", expect.stringMatching(/^Required to request approval: 1 of /));
+  }, 20_000);
+
+  it("drops the mark and the count once the field is filled in here, since that value counts for all of them", async () => {
+    const dialog = renderDialog([cr("a", { customerApprovalRequired: true }), cr("b", { assignedTeam: TEAM })]);
+    await loaded(dialog);
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(group(dialog)).toBeRequired();
+    expect(project(dialog)).toBeRequired();
+
+    pick(dialog, "Assignment group", "Platform");
+    expect(group(dialog)).not.toBeRequired();
+    expect(group(dialog)).not.toHaveAccessibleDescription();
+
+    fireEvent.change(project(dialog), { target: { value: "proj-a" } });
+    expect(project(dialog)).not.toBeRequired();
+    expect(project(dialog)).toHaveAttribute("data-helper-text", "");
+
+    // Both go out with the move, and the run's plan takes them over what each one has stored.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 change requests" }));
+    expect(onApply).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "assess", assignedTeamId: "team-2", projectId: "proj-a" }),
+    );
   }, 20_000);
 });

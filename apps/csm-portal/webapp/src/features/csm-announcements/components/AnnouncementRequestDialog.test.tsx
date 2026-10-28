@@ -412,7 +412,10 @@ describe("AnnouncementRequestDialog — required fields", () => {
     expect(screen.getByRole("textbox", { name: /^subject$/i })).toBeRequired();
     const caption = screen.getByText("Description");
     expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
-    expect(screen.getByLabelText("Description")).toHaveAttribute("aria-required", "true");
+    const editor = screen.getByLabelText("Description");
+    expect(editor).toHaveAttribute("aria-required", "true");
+    // The caption names the editor's group, as on the create forms.
+    expect(within(screen.getByRole("group", { name: "Description" })).getByLabelText("Description")).toBe(editor);
     expect(screen.getByText("Required to submit for approval.")).toBeInTheDocument();
   });
 
@@ -436,6 +439,18 @@ describe("AnnouncementRequestDialog — required fields", () => {
     expect(publishBtn).toBeDisabled();
     fireEvent.click(publishBtn);
     expect(screen.queryByText("Confirm before sending")).not.toBeInTheDocument();
+  });
+
+  it("counts an inline image as a saved description, so an image-only one does not block Publish", () => {
+    mockGet({
+      state: "approved",
+      description: '<p><img src="data:image/png;base64,AAAA" alt=""></p>',
+      resolvedProjectIds: ["p-1"],
+      resolvedProjectCount: 1,
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /^publish$/i })).toBeEnabled();
   });
 
   it("does not block Retry failed projects on an empty saved description (content is locked for the retry)", () => {
@@ -482,7 +497,7 @@ describe("AnnouncementRequestDialog — required fields", () => {
     expect(label!.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
   });
 
-  it("marks the update editor aria-required and keeps Post update disabled for a cleared editor", () => {
+  it("marks the update editor required under its own caption and keeps Post update disabled for a cleared editor", () => {
     mockGet({
       state: "published",
       resolvedProjectIds: ["p-1"],
@@ -495,6 +510,9 @@ describe("AnnouncementRequestDialog — required fields", () => {
 
     const editor = screen.getByLabelText("Description");
     expect(editor).toHaveAttribute("aria-required", "true");
+    // A visible caption with the asterisk, naming the editor's group.
+    expect(screen.getByText("Update").querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(within(screen.getByRole("group", { name: "Update" })).getByLabelText("Description")).toBe(editor);
     const postBtn = screen.getByRole("button", { name: /^post update$/i });
     expect(postBtn).toBeDisabled();
 
@@ -503,6 +521,10 @@ describe("AnnouncementRequestDialog — required fields", () => {
     expect(postBtn).toBeDisabled();
 
     fireEvent.change(editor, { target: { value: "<p>A correction.</p>" } });
+    expect(postBtn).toBeEnabled();
+
+    // An inline image alone is something to post.
+    fireEvent.change(editor, { target: { value: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' } });
     expect(postBtn).toBeEnabled();
   });
 });

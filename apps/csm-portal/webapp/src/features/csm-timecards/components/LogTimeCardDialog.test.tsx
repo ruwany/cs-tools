@@ -594,9 +594,11 @@ describe("LogTimeCardDialog — required marks", () => {
     expect(captionHasMark("Work log comment")).toBe(true);
     expect(screen.getByLabelText("work-log-editor")).toHaveAttribute("aria-required", "true");
     expect(captionHasMark("Approver (team lead)")).toBe(true);
-    expect(
-      screen.getByPlaceholderText("Search engineers by name or email…"),
-    ).toHaveAttribute("aria-required", "true");
+    // The search box is named by that caption (the asterisk is aria-hidden), not
+    // just its placeholder.
+    const approverSearch = screen.getByRole("textbox", { name: "Approver (team lead)" });
+    expect(approverSearch).toBe(screen.getByPlaceholderText("Search engineers by name or email…"));
+    expect(approverSearch).toHaveAttribute("aria-required", "true");
     // One asterisk each: the work log caption no longer carries a typed "*".
     expect(screen.queryByText(/Work log comment \*/)).not.toBeInTheDocument();
   });

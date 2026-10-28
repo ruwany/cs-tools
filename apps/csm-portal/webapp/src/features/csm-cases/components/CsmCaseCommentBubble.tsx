@@ -42,7 +42,7 @@ import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { pickAccessibleText } from "@utils/contrastText";
 import {
-  isBlankHtml,
+  hasVisibleContent,
   sanitizeRichTextHtml,
   stripLightModeInlineStyles,
 } from "@utils/sanitizeHtml";
@@ -102,15 +102,6 @@ function isSafeHref(href: string | undefined): href is string {
   } catch {
     return false;
   }
-}
-
-/**
- * An edit that leaves nothing to show: the backend refuses only an empty
- * string, but a cleared rich editor sends `<p><br></p>`, which would save a
- * blank comment. An inline image counts as content, as it does on display.
- */
-function isEmptyCommentEdit(html: string): boolean {
-  return !/<img\b/i.test(html) && isBlankHtml(html);
 }
 
 const ROLE_LABEL: Record<CsmCommentAuthorRole, string> = {
@@ -331,7 +322,10 @@ export default function CsmCaseCommentBubble({
     setEditValue(comment.bodyHtml);
     setEditError(null);
   };
-  const editIsEmpty = isEmptyCommentEdit(editValue);
+  // An edit that leaves nothing to show: the backend refuses only an empty
+  // string, but a cleared rich editor sends `<p><br></p>`, which would save a
+  // blank comment. An inline image counts as content, as it does on display.
+  const editIsEmpty = !hasVisibleContent(editValue);
   const saveEdit = async (): Promise<void> => {
     if (!onEditComment || editIsEmpty) return;
     setIsSavingEdit(true);

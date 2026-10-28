@@ -162,6 +162,32 @@ describe("EditCaseDetailsDialog — change gating and sequential per-field submi
     expect(onSubmit).toHaveBeenCalledWith({ description: "<p>Changed</p>" });
   });
 
+  it("does not mark an untouched blank subject required, only one the user has changed", () => {
+    setupHooks();
+    render(
+      <EditCaseDetailsDialog
+        projectId="prj-1"
+        currentSubject=""
+        currentDescriptionHtml="<p>Original</p>"
+        isSaving={false}
+        onClose={() => {}}
+        onSubmit={vi.fn().mockResolvedValue([])}
+      />,
+    );
+    const subjectInput = screen.getByRole("textbox", { name: /^subject$/i });
+    expect(subjectInput).not.toBeRequired();
+
+    // Typed into, it is held to the same rule as a stored subject.
+    fireEvent.change(subjectInput, { target: { value: "  " } });
+    expect(subjectInput).toBeRequired();
+    expect(screen.getByText("Subject is required.")).toBeInTheDocument();
+
+    // Back to exactly what was stored: untouched again, so neither.
+    fireEvent.change(subjectInput, { target: { value: "" } });
+    expect(subjectInput).not.toBeRequired();
+    expect(screen.queryByText("Subject is required.")).not.toBeInTheDocument();
+  });
+
   it("renders a per-field result once the submission settles, including a failure", async () => {
     setupHooks();
     const onSubmit = vi.fn().mockResolvedValue([

@@ -156,8 +156,9 @@ export default function EditCaseDetailsDialog({
   // The form never sends a blank subject, so a cleared one blocks Save rather
   // than being quietly left at its old value. Only once the user has changed
   // it: an untouched blank (a case that never had a subject) still lets the
-  // other fields save as before.
-  const subjectMissing = subject !== currentSubject && subject.trim() === "";
+  // other fields save as before, and is not marked required.
+  const subjectRequired = currentSubject.trim() !== "" || subject !== currentSubject;
+  const subjectMissing = subjectRequired && subject.trim() === "";
 
   const handleSubmit = (): void => {
     if (!hasChanges || subjectMissing) return;
@@ -201,7 +202,7 @@ export default function EditCaseDetailsDialog({
             label="Subject"
             size="small"
             fullWidth
-            required
+            required={subjectRequired}
             value={subject}
             onChange={(e) => setSubject(e.target.value.slice(0, 200))}
             disabled={isSaving}

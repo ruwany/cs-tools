@@ -289,10 +289,12 @@ export default function BulkEditChangeRequestsDialog({
 
   // Request Approval needs an assignment group, and (in New) a Customer Project when a customer step is ticked on
   // a non-Emergency change. A change request missing one is skipped by the run, so the field is marked required
-  // while any selected one lacks it; a value set here counts for all of them.
+  // while any selected one lacks it and the field is still empty: the plan takes a value set here first, so it
+  // counts for all of them (for the project, one is set when it is sent: sendScope).
   const requestingApproval = state === "assess";
-  const lackingTeamCount = requestingApproval ? open.filter((cr) => !cr.assignedTeam?.id).length : 0;
-  const lackingProjectCount = requestingApproval
+  const lackingTeamCount =
+    requestingApproval && !assignedTeamId ? open.filter((cr) => !cr.assignedTeam?.id).length : 0;
+  const lackingProjectCount = requestingApproval && !sendScope
     ? open.filter(
         (cr) =>
           isChangeRequestCreationPhase(cr.state) &&

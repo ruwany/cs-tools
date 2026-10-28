@@ -48,7 +48,7 @@ import {
   resolveDisplayTimeZone,
   zonedInputToUtcIso,
 } from "@utils/dateTime";
-import { sanitizeAnnouncementHtml } from "@utils/sanitizeHtml";
+import { hasVisibleContent, sanitizeAnnouncementHtml } from "@utils/sanitizeHtml";
 import {
   DRY_RUN_TAG_LABEL,
   useAnnouncementDryRun,
@@ -117,12 +117,6 @@ function whoWhen(who?: string | null, when?: string | null): string {
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
 function isEmptyHtml(html: string): boolean {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
-
-/** An update with nothing to post: no text and no inline image. A cleared rich
- * editor still sends `<p><br></p>`, which a plain trim lets through. */
-function isBlankUpdate(html: string): boolean {
-  return !/<img\b/i.test(html) && isEmptyHtml(html);
 }
 
 /**
@@ -409,8 +403,9 @@ export default function AnnouncementRequestDialog({
   const contentLockedForRetry = request?.state === "approved" && publish.failedProjectIds.length > 0;
   // Publish sends the saved description as every case's body, and an
   // announcement case needs one, so an approved request saved with the
-  // description cleared cannot be published until it has one again.
-  const savedDescriptionEmpty = !!request && isEmptyHtml(request.description);
+  // description cleared cannot be published until it has one again (text or an
+  // inline image).
+  const savedDescriptionEmpty = !!request && !hasVisibleContent(request.description);
   // A first publish (or a scheduled one) needs it. The two retries do not: content is
   // locked while projects failed (contentLockedForRetry), and the security-label retry
   // creates no case.
@@ -544,21 +539,28 @@ export default function AnnouncementRequestDialog({
                   disabled={contentLockedForRetry}
                 />
                 <Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                  <Typography
+                    id="announcement-request-description-label"
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mb: 0.5 }}
+                  >
                     Description
                     <RequiredMark />
                   </Typography>
-                  <EditorWithSourceToggle
-                    keepStyledHtmlAsSource
-                    value={description}
-                    onChange={setDescription}
-                    placeholder="Describe the announcement…"
-                    minHeight={140}
-                    maxHeight={320}
-                    toolbarVariant="full"
-                    disabled={contentLockedForRetry}
-                    ariaRequired
-                  />
+                  <Box role="group" aria-labelledby="announcement-request-description-label">
+                    <EditorWithSourceToggle
+                      keepStyledHtmlAsSource
+                      value={description}
+                      onChange={setDescription}
+                      placeholder="Describe the announcement…"
+                      minHeight={140}
+                      maxHeight={320}
+                      toolbarVariant="full"
+                      disabled={contentLockedForRetry}
+                      ariaRequired
+                    />
+                  </Box>
                   {/* Saving accepts an empty description; the next step does not
                       (submit runs a dry-run case, publish creates the real ones). */}
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
@@ -1066,12 +1068,25 @@ export default function AnnouncementRequestDialog({
                 {(!claimsReady ||
                   (isRequestCreator && (request.publishedCaseIds ?? []).length > 0)) && (
                   <>
-                    <EditorWithSourceToggle
-                      keepStyledHtmlAsSource
-                      value={updateContent}
-                      onChange={setUpdateContent}
-                      ariaRequired
-                    />
+                    <Box>
+                      <Typography
+                        id="announcement-update-label"
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: "block", mb: 0.5 }}
+                      >
+                        Update
+                        <RequiredMark />
+                      </Typography>
+                      <Box role="group" aria-labelledby="announcement-update-label">
+                        <EditorWithSourceToggle
+                          keepStyledHtmlAsSource
+                          value={updateContent}
+                          onChange={setUpdateContent}
+                          ariaRequired
+                        />
+                      </Box>
+                    </Box>
                     <Box>
                       <Button
                         variant="outlined"
@@ -1079,7 +1094,8 @@ export default function AnnouncementRequestDialog({
                         disabled={
                           !claimsReady ||
                           !isRequestCreator ||
-                          isBlankUpdate(updateContent) ||
+                          // A cleared rich editor still sends `<p><br></p>`; an inline image counts.
+                          !hasVisibleContent(updateContent) ||
                           createUpdate.isPending ||
                           postUpdateComments.posting ||
                           (request.publishedCaseIds ?? []).length === 0 ||

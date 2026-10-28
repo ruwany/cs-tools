@@ -166,6 +166,22 @@ describe("CsmKBArticleEditorPage — required fields", () => {
     );
   });
 
+  it("creates an article whose body is an inline image only", () => {
+    renderAt("/knowledge/my-articles/new");
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Key rotation diagram" },
+    });
+    const imageOnly = '<p><img src="data:image/png;base64,AAAA" alt=""></p>';
+    fireEvent.change(screen.getByLabelText("body-editor"), { target: { value: imageOnly } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(screen.queryByText("Body is required.")).not.toBeInTheDocument();
+    expect(createMutate).toHaveBeenCalledWith(
+      { knowledgeBaseId: "kb-1", title: "Key rotation diagram", body: imageOnly, authorId: "user-1" },
+      expect.anything(),
+    );
+  });
+
   it("only needs a title when saving an existing draft: the body is not required there", () => {
     article = { ...DRAFT };
     renderAt("/knowledge/my-articles/art-1");

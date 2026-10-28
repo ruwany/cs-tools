@@ -37,7 +37,7 @@ import { useState, type JSX } from "react";
 import { useParams } from "react-router";
 import Editor from "@components/rich-text-editor/Editor";
 import RequiredMark from "@components/RequiredMark";
-import { isBlankHtml } from "@utils/sanitizeHtml";
+import { hasVisibleContent } from "@utils/sanitizeHtml";
 import QueryErrorState from "@components/QueryErrorState";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -147,7 +147,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
   // one); a later content save does not. An editor that was typed in and
   // emptied again still emits markup such as "<p><br></p>", so blank is
   // judged on the visible content, while an image-only body counts as one.
-  const bodyMissing = isCreateMode && isBlankHtml(body) && !/<img\b/i.test(body);
+  const bodyMissing = isCreateMode && !hasVisibleContent(body);
   const showBodyError = bodyRequiredShown && bodyMissing;
 
   const handleKbChange = (e: SelectChangeEvent): void => {

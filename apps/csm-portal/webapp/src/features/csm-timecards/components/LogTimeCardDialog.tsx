@@ -674,7 +674,7 @@ export default function LogTimeCardDialog({
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
             {/* Required on create only: an edit never sends the approver
                 (see timeCardDraftErrors' requireApprover). */}
-            <Typography variant="subtitle2">
+            <Typography id="time-card-approver-label" variant="subtitle2">
               Approver (team lead)
               {!isEditMode && <RequiredMark />}
             </Typography>
@@ -705,8 +705,10 @@ export default function LogTimeCardDialog({
                         </InputAdornment>
                       ),
                     },
-                    // Only rendered on create, while no approver is picked.
-                    htmlInput: { "aria-required": true },
+                    // Only rendered on create, while no approver is picked. Named by
+                    // the caption above, which carries the asterisk; the placeholder
+                    // is only a hint.
+                    htmlInput: { "aria-required": true, "aria-labelledby": "time-card-approver-label" },
                   }}
                 />
                 <Box
