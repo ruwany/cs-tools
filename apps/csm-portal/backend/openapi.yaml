@@ -6169,12 +6169,24 @@ paths:
                 priority:
                   type: string
                   enum: [critical, high, moderate, low]
+                  description: >-
+                    Any other value is a 400, planning included (a change request migrated
+                    from the previous system can read back planning, but it is not a value
+                    this API sets): on the PostgreSQL data sources `priority must be one of
+                    critical, high, moderate or low`, as on PATCH, before anything is
+                    written.
                 impact:
                   type: string
                   enum: [high, medium, low]
+                  description: >-
+                    Any other value is a 400 (on the PostgreSQL data sources `impact must be
+                    one of high, medium or low`), before anything is written.
                 risk:
                   type: string
                   enum: [high, moderate, low]
+                  description: >-
+                    Any other value is a 400 (on the PostgreSQL data sources `risk must be
+                    one of high, moderate or low`), before anything is written.
                 state:
                   type: string
                   enum: [new]
@@ -6380,6 +6392,24 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
           description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: >-
+            The entity service's 404, passed through with a fixed message. It answers a create
+            with one only when its row-level policy refuses the insert, which an internal caller
+            such as this backend does not meet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: >-
+            The entity service's 409, its reason echoed: on the data source that writes the
+            previous system first, that system refused the create as a conflict or answered with
+            an id or number a change request already has. Nothing was written to PostgreSQL.
           content:
             application/json:
               schema:
@@ -17719,8 +17749,11 @@ components:
         Any combination of fields may be supplied; at least one is required.
         Omitted fields are left unchanged. An explicit null clears implementationPlan,
         priority, category, requestedById, affectedServicesText, affectedComponentsText and
-        rollbackDurationText, and counts as a field on its own; on every other field it is
-        read as omitted, or refused (see each). isCustomerApproved and isCustomerReviewed
+        rollbackDurationText, and counts as a field on its own; a null durationInput is
+        refused by the PostgreSQL data sources (see durationInput). On every other field a
+        null is refused (see each) or read as omitted, changing nothing and not counting as a
+        field; none of those fields is declared nullable, so send a value or leave the field
+        out. isCustomerApproved and isCustomerReviewed
         are the customer's own answer, not an edit: any value but null is refused (a
         400, no upstream call), see each. The schema still declares that at most one of
         isCustomerApproved, isCustomerReviewed and requestApproval may be set.
@@ -17756,8 +17789,8 @@ components:
             400 (`serviceId does not refer to an existing record`). It cannot be cleared. It is a
             field on its own: a request that carries only `serviceId` is a valid request. Stored
             by the PostgreSQL data sources only, and not mirrored to the previous system; on the
-            data source that talks to the previous system directly a request that carries nothing
-            else is a 400 naming it.
+            data source that talks to the previous system directly a request that carries it is a
+            400 naming it, whatever else the request carries.
         serviceOfferingId:
           type: string
           format: uuid
@@ -17804,9 +17837,10 @@ components:
           nullable: true
           enum: [critical, high, moderate, low]
           description: >-
-            Any other value is a 400 (`priority contains invalid value: ...`), planning included
-            (a change request migrated from the previous system can read back planning, but it is
-            not a value this API sets). An explicit null clears it.
+            Any other value is a 400 (on the PostgreSQL data sources `priority must be one of
+            critical, high, moderate or low`, as on create), planning included (a change request
+            migrated from the previous system can read back planning, but it is not a value this
+            API sets). An explicit null clears it.
         state:
           type: string
           description: >-
@@ -18012,13 +18046,14 @@ components:
             `onHold: false`, and so is `confirmCustomerUpdatedDate`. Other requests are not
             affected, and it can be sent in any state. Stored by the PostgreSQL data sources only,
             and not mirrored to the previous system; on the data source that talks to the
-            previous system directly a request that carries nothing else is a 400 naming it.
+            previous system directly a request that carries it (or `onHoldReason`, `serviceId`,
+            `serviceOfferingId`) is a 400 naming them, whatever else the request carries.
         onHoldReason:
           type: string
           description: >-
             Why the change request is on hold. With `onHold: true` it becomes the reason; with
             `onHold: false` it is ignored. Sent alone it replaces the stored reason. Stored by the
-            PostgreSQL data sources only.
+            PostgreSQL data sources only, as `onHold`.
         confirmCustomerUpdatedDate:
           type: string
           enum: [agree]

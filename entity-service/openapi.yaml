@@ -7475,8 +7475,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: >-
+            "change request not found": the row-level policy on change_request refused the
+            insert (only an internal caller may insert one). The route admits internal callers
+            only, so a caller that passes it does not get this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            On the create that writes the previous system first: that system refused the create
+            as a conflict, or answered with an id or number a change request in PostgreSQL
+            already has. Nothing was written to PostgreSQL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            The caller's identity could not be resolved to a scope (for example no verified
+            identity on the request), or, on the create that writes the previous system first,
+            that system is unavailable (nothing was written to PostgreSQL).
           content:
             application/json:
               schema:
@@ -25795,12 +25822,21 @@ components:
             - high
             - moderate
             - low
+          description: >-
+            Any other value is a 400, planning included (a change request migrated from the
+            previous system can read back planning, but it is not a value this API sets): on the
+            PostgreSQL data sources "priority must be one of critical, high, moderate or low", as
+            on PATCH, before anything is written and, on the create that writes the previous
+            system first, before that system is called.
         impact:
           type: string
           enum:
             - high
             - medium
             - low
+          description: >-
+            Any other value is a 400 (on the PostgreSQL data sources "impact must be one of high,
+            medium or low"), checked like priority.
         state:
           type: string
           enum:
@@ -25834,6 +25870,9 @@ components:
             - high
             - moderate
             - low
+          description: >-
+            Any other value is a 400 (on the PostgreSQL data sources "risk must be one of high,
+            moderate or low"), checked like priority.
         requestedById:
           type: string
           format: uuid
@@ -26094,12 +26133,17 @@ components:
         Omitted fields are left unchanged.
         AN EXPLICIT NULL clears implementationPlan, priority, category, requestedById,
         affectedServicesText, affectedComponentsText and rollbackDurationText, and counts as a
-        field on its own (`{"implementationPlan": null}` alone is a valid request). On every
-        other field a null is read as omitted, except customerGroupId and environmentIds,
-        where it is refused like any other value. The keys are matched without regard to
-        case, as the struct is decoded; one of these seven fields named twice with different
-        capitalisation is a 400. The data source that talks to the previous system directly
-        forwards a null to it as a null.
+        field on its own (`{"implementationPlan": null}` alone is a valid request); the data
+        source that talks to the previous system directly forwards it to that system as a
+        null. A null durationInput is forwarded the same way by that data source and refused
+        by the PostgreSQL data sources, like any durationInput. customerGroupId and
+        environmentIds refuse a null like any other value. On every other field a null is
+        read as omitted: it changes nothing and does not count as a field. Of those fields
+        only deploymentProductIds is declared nullable; on the others send a value or leave
+        the field out. The keys are matched without regard to case, as the struct is decoded;
+        a body that names one of the ten fields whose null clears or is refused (the eight
+        above, customerGroupId and environmentIds) twice, with different capitalisation, is a
+        400.
         APPROVED CHANGE REQUESTS ARE READ-ONLY (PostgreSQL data source): once a change
         request has been approved -- it is in customer_approval, scheduled, implement,
         review, customer_review, closed or rollback, which it reaches only through its CAB
@@ -26163,11 +26207,11 @@ components:
             The IT service (an id from POST /services/search). An id that refers to no service is
             a 400 ("serviceId does not refer to an existing record"). It cannot be cleared: an
             explicit null is read as omitted. It is a field on its own: a request that carries
-            only serviceId is a valid request. PostgreSQL data source only: it is not mirrored to
-            the previous system (a request that carries nothing else the previous system takes is
-            not sent to it at all). The data source that talks to the previous system directly
-            cannot send it: sent with a field it does send, it is not written; sent with nothing
-            else, it is a 400 naming it.
+            only serviceId is a valid request. PostgreSQL data sources only: it is not mirrored
+            to the previous system (a request that carries nothing else the previous system
+            takes is not sent to it at all). The data source that talks to the previous system
+            directly cannot send it: a request that carries it is a 400 naming it, whatever
+            else the request carries.
         serviceOfferingId:
           type: string
           format: uuid
@@ -26175,7 +26219,7 @@ components:
             The service offering (an id from POST /service-offerings/search). It is not checked
             against serviceId. An id that refers to no offering is a 400 ("serviceOfferingId does
             not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it is
-            a field on its own, and it is PostgreSQL data source only.
+            a field on its own, and it is PostgreSQL data sources only.
         assignedEngineerId:
           type: string
           format: uuid
@@ -26347,20 +26391,19 @@ components:
             before changing its state") unless it also sends onHold false. confirmCustomerUpdatedDate
             is refused with the same 400, and a customer's proposed implementation time with a 409
             (errorCode change_request_on_hold); other requests are not affected. Not under the
-            approved-content lock. PostgreSQL data source only: it is not mirrored to the previous
-            system (a request that carries nothing else the previous system takes, such as
-            onHold with onHoldReason, is not sent to it at all, so no write-back failure is
-            recorded). The data source that talks to the previous system directly cannot send it:
-            sent with a field it does send, it is not written; sent with nothing else, it is a 400
-            naming every such field the request carries (onHold, onHoldReason, serviceId,
-            serviceOfferingId).
+            approved-content lock. PostgreSQL data sources only: it is not mirrored to the
+            previous system (a request that carries nothing else the previous system takes, such
+            as onHold with onHoldReason, is not sent to it at all, so no write-back failure is
+            recorded). The data source that talks to the previous system directly cannot send
+            it: a request that carries onHold, onHoldReason, serviceId or serviceOfferingId is a
+            400 naming every one of them it carries, whatever else it carries.
         onHoldReason:
           type: string
           description: >-
             Why the change request is on hold (free text). With onHold true it becomes the hold
             reason; with onHold false it is ignored and the reason is cleared. Sent without onHold
             it replaces the stored reason, whether or not the change request is on hold.
-            PostgreSQL data source only, as onHold.
+            PostgreSQL data sources only, as onHold.
         isPlanningVisibleToCustomers:
           type: boolean
           description: >-
@@ -26427,10 +26470,11 @@ components:
           nullable: true
           enum: [critical, high, moderate, low]
           description: >-
-            Any other value is a 400 ("priority contains invalid value: ..."), planning included:
-            a change request migrated from the previous system can read back planning (its
-            priority 5), but it is not a value this API sets, so it is refused even when it is
-            the stored value. An explicit null clears the priority.
+            Any other value is a 400 (on the PostgreSQL data sources "priority must be one of
+            critical, high, moderate or low", as on create), planning included: a change request
+            migrated from the previous system can read back planning (its priority 5), but it is
+            not a value this API sets, so it is refused even when it is the stored value. An
+            explicit null clears the priority.
         category:
           type: string
           enum: [hardware, software, service, system_software, applications_software,
@@ -26504,6 +26548,7 @@ components:
             `environmentIds is no longer supported: deployments carry the environment`.
         deploymentProductIds:
           type: array
+          nullable: true
           maxItems: 100
           items:
             type: string
@@ -26511,7 +26556,8 @@ components:
           description: >-
             READ-ONLY, derived from the deployments. Accepted only when it is
             exactly the derived set (otherwise 400); the stored list is always
-            the derived one. An explicit null is read as omitted.
+            the derived one. An explicit null is read as omitted: it changes
+            nothing and does not count as a field.
         comment:
           type: string
           description: >-

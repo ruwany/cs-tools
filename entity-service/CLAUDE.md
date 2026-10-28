@@ -3956,35 +3956,54 @@ change-request-specific was added beyond the field on the read model:
   previous system are not migrated today; widening that filter (and the
   `work_item_id` resolution) to `change_request` is what it would take.
 
-### PATCH: explicit null, a service-only request, priority, and what is mirrored
+### PATCH: what a null does, a service-only request, priority, and what is mirrored
 
-- **An explicit null clears.** `PatchChangeRequestRequest.UnmarshalJSON` (`domain/change_request_patch_json.go`,
-  same approach as `PatchOutageRequest`) turns `"implementationPlan": null` (likewise `priority`, `category`,
-  `requestedById`, `affectedServicesText`, `affectedComponentsText`, `rollbackDurationText`, `durationInput`,
-  `customerGroupId`) into a non-nil outer pointer holding nil, which the repository writes as NULL and the
-  previous system's adapter forwards as null. `encoding/json` alone reads a null as omitted, so before this
-  `{"implementationPlan": null}` was a 400 "at least one field must be provided" and a null beside other fields
-  was silently ignored; the old "explicit null" tests built the struct in Go and never saw it. `environmentIds:
-  null` is now refused like any other value; `deploymentIds` / `deploymentProductIds` null stays "omitted" (an
-  empty array clears a list); a plain `*string` field's null stays "omitted". It keeps `DisallowUnknownFields`
-  itself (a custom `UnmarshalJSON` does not inherit the outer decoder's setting) and refuses one of those keys
-  given twice with different capitalisation. The tags carry `omitempty`, so the marshalled request in a
-  write-back failure record reads back the same.
-- **`serviceId` / `serviceOfferingId` count as fields**: a PATCH that only sets the service is accepted (it was
-  left out of the "at least one field" check).
-- **`priority` is validated** (`validChangeRequestPriority` in the service, `changeRequestPatchPriorityPGLabels`
-  in the repository): critical, high, moderate, low. `planning` is refused although the enum holds it (migration
-  0100, for migrated rows, which read back "planning"); anything else used to reach the enum cast as a 500.
-- **Not mirrored**: `onHold`, `onHoldReason`, `serviceId`, `serviceOfferingId` (the previous system's PATCH
-  payload has no field for them, so they were always dropped there). They are stripped from the dual-write
-  mirror, so a PATCH carrying only them is not dispatched (it used to be refused by the mirror and recorded as a
-  write-back failure). On `DATA_SOURCE=servicenow` a PATCH carrying only them is a 400 naming them ("onHold,
-  onHoldReason are not supported on the ServiceNow data source"); beside a field that data source sends, they are
-  not written, as before.
-- Tests: `domain/change_request_patch_json_test.go`, `handler/change_request_patch_decode_test.go` (real JSON
-  through the handler and the service), `handler/change_request_patch_integration_test.go`
-  (`CHANGE_REQUEST_TEST_DSN`), `service/change_request_service_mirror_test.go` (the real previous-system adapter
-  as the mirror).
+- **An explicit null clears** `implementationPlan`, `priority`, `category`,
+  `requestedById`, `affectedServicesText`, `affectedComponentsText` and
+  `rollbackDurationText`, and counts as a field on its own
+  (`{"implementationPlan": null}` alone is a PATCH).
+  `PatchChangeRequestRequest.UnmarshalJSON` (`domain/change_request_patch_json.go`,
+  the approach `PatchOutageRequest` takes) turns such a null into a non-nil outer
+  pointer holding nil, which the repository writes as NULL and the data source
+  that talks to the previous system directly forwards as null (`encoding/json`
+  alone reads a null as an omitted field). A null `durationInput` takes the same
+  shape: that data source forwards it, and the PostgreSQL data sources refuse it
+  like any `durationInput`. `customerGroupId: null` and `environmentIds: null` are
+  refused like any other value of those fields. On every other field a null is
+  read as omitted: it changes nothing and does not count as a field (a list is
+  cleared with an empty array, `deploymentIds: []`). The decoder keeps
+  `DisallowUnknownFields` itself (a custom `UnmarshalJSON` does not inherit the
+  outer decoder's setting) and refuses a body that names one of the ten fields
+  above twice with different capitalisation. The tags carry `omitempty`, so the
+  marshalled request in a write-back failure record leaves omitted fields out and
+  keeps an explicit null as null.
+- **`serviceId` / `serviceOfferingId` count as fields**: a PATCH that only sets
+  the service is a PATCH.
+- **`priority`** must be critical, high, moderate or low, on PATCH and on create
+  (`validateChangeRequestPriority` in `change_request_service.go`, before the
+  repository is called): anything else is a 400 "priority must be one of
+  critical, high, moderate or low". `planning` is refused too, although
+  `change_request_priority_enum` holds it (migration 0100) and a migrated change
+  request reads it back as "planning". Create checks `impact` and `risk` the same
+  way (`validateCreateChangeRequestLevels`: "impact must be one of high, medium or
+  low", "risk must be one of high, moderate or low"), on both create paths, before
+  anything is written and before the previous system is called.
+- **Not mirrored**: `onHold`, `onHoldReason`, `serviceId`, `serviceOfferingId`.
+  The previous system's PATCH has no field for them, so the dual-write service
+  strips them from the mirror, as it strips `implementationDeviation`, and a PATCH
+  that carries nothing else is not dispatched (no write-back failure is
+  recorded). The data source that talks to the previous system directly
+  (`DATA_SOURCE=servicenow`) refuses a PATCH that carries any of them with a 400
+  naming them, whatever else it carries (`snUnforwardedChangeRequestPatchFields`).
+- Tests: `domain/change_request_patch_json_test.go`;
+  `handler/change_request_patch_decode_test.go` and
+  `handler/change_request_create_decode_test.go` (real JSON through the handler
+  and the service, both create paths); `handler/change_request_patch_integration_test.go`
+  (`CHANGE_REQUEST_TEST_DSN`: PATCH and both creates against PostgreSQL);
+  `service/change_request_service_mirror_test.go` (the real previous-system
+  adapter as the mirror). A test that a PATCH is not mirrored sends a mirrored
+  sentinel PATCH after it and waits for that: the write-back dispatcher runs one
+  change request's writes one at a time, in dispatch order.
 
 ### The approval tables are the sync layer's (state, not status)
 
@@ -5340,10 +5359,10 @@ the rest moved to a project with contacts, `createAnswerable`).
 
 ### An approved change request is read-only (only work notes and the deviation are added)
 
-Decision (the user's, 2026-10-21): once the change request has been approved (CAB approval, or Request
-Approval for a Standard change), every field of the change request is read-only, the implementation plan
-included; only work notes can still be added, and (the user's, 2026-10-22; narrowed 2026-10-26) the deviation from the
-implementation plan, from Implement until the change is closed, canceled or rolled back (see the next section). Code:
+Once the change request has been approved (CAB approval, or Request Approval for a Standard change), every
+field of the change request is read-only, the implementation plan included; only work notes can still be added,
+and the deviation from the implementation plan, from Implement until the change is closed, canceled or rolled back
+(see the next section). Code:
 `change_request_approved_lock.go` (`checkApprovedContentLock`, called in `patchChangeRequestTx` right
 after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`change_request_approved_read_only`).
 
@@ -5392,24 +5411,24 @@ after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`chang
 
 ### The deviation from the implementation plan (recorded from Implement on, final once closed)
 
-Decision (the user's, 2026-10-22): what the implementation or the review actually did differently from the
-approved implementation plan is recorded in a field of its own, "Deviation from the implementation plan", that is
-not under the approved-content lock, is final once the change request reaches a final state (closed, canceled or rolled
-back), and is copied by a clone. Narrowed (the user's, 2026-10-26): the deviation is only relevant during implementation,
-so it is recorded from Implement on, and a clone's carried-over one has to be folded into the new change's plan and cleared
-before its Request Approval. Code: `change_request_deviation.go`; migration `0245_change_request_implementation_deviation.sql`
+What the implementation or the review actually did differently from the approved implementation plan is recorded
+in a field of its own, "Deviation from the implementation plan", that is not under the approved-content lock, is
+final once the change request reaches a final state (closed, canceled or rolled back), and is copied by a clone. The
+deviation is only relevant during implementation, so it is recorded from Implement on, and a clone's carried-over
+one has to be folded into the new change's plan and cleared before its Request Approval. Code:
+`change_request_deviation.go`; migration `0245_change_request_implementation_deviation.sql`
 (`change_request.implementation_deviation TEXT`, `ADD COLUMN IF NOT EXISTS`, safe to re-run). Apply it before deploying
 the build, as usual: the detail read and both create inserts name the column, so the build fails every change request
 read and create on a database without it (the older build never names it, so the migration first is safe).
 
 - **The previous system has no such field.** So it is PostgreSQL-only: the dual-write PATCH mirror and the create
   that calls the previous system first strip it (a deviation-only PATCH mirrors nothing, so no write-back failure is
-  recorded), and the data source that talks to the previous system directly refuses it with a 400
-  (`implementationDeviation is not supported on the ServiceNow data source`; on create only a non-blank one).
+  recorded), and the data source that talks to the previous system directly refuses it with a 400 that names the
+  field (on create only a non-blank one).
 - **API.** `implementationDeviation` on the detail (and the PATCH receipt, the same read), on create, and on
-  PATCH as a plain `*string`: nil leaves it, a blank value clears it to NULL. Not the plan's
-  pointer-to-pointer: `encoding/json` decodes an explicit `null` into an omitted field, so that shape cannot
-  clear over HTTP. Not on search rows. Create accepts it on every create path, in every case (a clone carries it),
+  PATCH as a plain `*string`: nil leaves it, a blank value clears it to NULL, and an explicit `null` is read as
+  omitted (it is not one of the pointer-to-pointer fields whose null clears, see "PATCH: what a null does"). Not
+  on search rows. Create accepts it on every create path, in every case (a clone carries it),
   from staff (below).
 - **Blank** is `IsBlankRichText` (`rich_text_blank.go`), which mirrors the CSM webapp's `isBlankHtml`: no text once the
   markup is removed (every tag stripped, the content DOMPurify drops with its element -- script, style, svg, ... --
@@ -5430,8 +5449,8 @@ read and create on a database without it (the older build never names it, so the
   isBlankHtml on 95, all tag soup and nearly all inside a `<select>` (where jsdom's parser and Go's follow different
   versions of the specification), and on none that is editor-like or that DOMPurify has sanitised. A value the parser
   refuses (elements nested more than 512 deep) is not blank: kept as written. It takes time linear in its input (it runs
-  under the change request's row locks, on up to the 1 MiB body cap): the slowest shape measured, 1 MiB of `<p><b>`,
-  takes about 110 ms (`TestIsBlankRichText_LinearTime`).
+  under the change request's row locks, on up to the 1 MiB body cap): `TestIsBlankRichText_LinearTime` parses 1 MiB of
+  each of 17 adversarial shapes and fails any that takes over 2 s.
 - **When it can change** (`checkDeviationEditable`, judged on the STORED state, before the PATCH is applied). It is
   deliberately **not** one of `approvedLockFields`, so the approved-content lock never judges it. Resending the stored
   value is the accepted no-op in every state, and a blank value is a change only when one (not blank) is stored. A change is:

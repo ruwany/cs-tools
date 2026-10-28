@@ -179,6 +179,13 @@ func newChangeRequestPatchEnv(t *testing.T) *changeRequestPatchEnv {
 
 func cpiStr(s string) *string { return &s }
 
+func cpiDeref(s *string) string {
+	if s == nil {
+		return "NULL"
+	}
+	return *s
+}
+
 // create makes a Normal change request in New with every clearable field set.
 func (e *changeRequestPatchEnv) create(t *testing.T) string {
 	t.Helper()
@@ -322,7 +329,7 @@ func TestChangeRequestPatchIntegration_ServiceAloneIsAPatch(t *testing.T) {
 		t.Fatalf("PATCH {serviceId} = %d %q, want 200", code, msg)
 	}
 	if got := e.row(t, id).ServiceID; got == nil || *got != cpiServiceID {
-		t.Fatalf("service_id = %v, want %s", got, cpiServiceID)
+		t.Fatalf("service_id = %s, want %s", cpiDeref(got), cpiServiceID)
 	}
 	if got := e.mirrorQuiet(t, id); len(got) != 0 {
 		t.Errorf("a service-only PATCH was sent to the previous system: %+v", got)
@@ -338,14 +345,14 @@ func TestChangeRequestPatchIntegration_PriorityIsValidated(t *testing.T) {
 			t.Errorf("priority %q = %d %q, want the 400 naming the priorities", p, code, msg)
 		}
 		if got := e.row(t, id).Priority; got == nil || *got != "HIGH" {
-			t.Errorf("priority %q changed the stored priority to %v", p, got)
+			t.Errorf("priority %q changed the stored priority (HIGH) to %s", p, cpiDeref(got))
 		}
 	}
 	if code, msg := e.patch(t, id, `{"priority": "low"}`); code != http.StatusOK {
 		t.Fatalf("priority low = %d %q, want 200", code, msg)
 	}
 	if got := e.row(t, id).Priority; got == nil || *got != "LOW" {
-		t.Fatalf("priority = %v, want LOW", got)
+		t.Fatalf("priority = %s, want LOW", cpiDeref(got))
 	}
 
 	// A row migrated with the previous system's priority 5 still reads back as
@@ -358,7 +365,7 @@ func TestChangeRequestPatchIntegration_PriorityIsValidated(t *testing.T) {
 		t.Fatalf("GetChangeRequestByID: %v", err)
 	}
 	if cr.Priority == nil || *cr.Priority != "planning" {
-		t.Errorf("a PLANNING row reads back as %v, want planning", cr.Priority)
+		t.Errorf("a PLANNING row reads back as %s, want planning", cpiDeref(cr.Priority))
 	}
 }
 
