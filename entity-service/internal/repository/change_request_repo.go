@@ -970,8 +970,8 @@ func (r *changeRequestRepo) AggregateChangeRequests(ctx context.Context, req dom
 // falling back to risk_impact_analysis / backout_plan: the create form's "Risk and
 // impact analysis" and "Backout plan" were written only to the latter pair, so a
 // change request created before both creates wrote the pair the read uses showed
-// neither field. Plain COALESCE (not NULLIF ''), so a field cleared by a PATCH
-// stays cleared.
+// neither field. Plain COALESCE (no NULLIF on the empty string), so a field
+// cleared by a PATCH stays cleared.
 const changeRequestDetailColumns = `
 	wi.created_by, cr.justification, COALESCE(cr.impact_description, cr.risk_impact_analysis), cr.service_outage_downtime,
 	cr.communication_plan, COALESCE(cr.rollback_process, cr.backout_plan), cr.test_plan,
@@ -1932,11 +1932,7 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		if *req.Priority == nil {
 			crSets = append(crSets, "priority = NULL")
 		} else {
-			label := strings.ToUpper(string(**req.Priority))
-			if !changeRequestPatchPriorityPGLabels[label] {
-				return "", &apierror.ValidationError{Msg: fmt.Sprintf("priority %q is not a change request priority: use critical, high, moderate or low", **req.Priority)}
-			}
-			addCR("priority = $%d::change_request_priority_enum", label)
+			addCR("priority = $%d::change_request_priority_enum", strings.ToUpper(string(**req.Priority)))
 		}
 	}
 	if req.Category != nil {
@@ -3583,14 +3579,6 @@ func callerPendingApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, appr
 		return unknown, unknownKind, nil
 	}
 	return first, firstKind, nil
-}
-
-// changeRequestPatchPriorityPGLabels is what a PATCH may write to
-// change_request_priority_enum: the domain's four priorities. The enum also
-// holds PLANNING (migration 0100, for rows migrated from the previous system),
-// which reads back as "planning" but is no value of this API.
-var changeRequestPatchPriorityPGLabels = map[string]bool{
-	"CRITICAL": true, "HIGH": true, "MODERATE": true, "LOW": true,
 }
 
 // changeRequestCategoryPGLabels is change_request_category_enum's label set

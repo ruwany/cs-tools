@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -30,11 +29,16 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
+// crMirrorSentinel is the title of the PATCH awaitMirroredWrites sends.
+const crMirrorSentinel = "mirror sentinel"
+
 // previousSystemCRServer stands in for the previous system's change request
-// PATCH and records every body it receives.
+// PATCH. It records every body it receives and signals sentinel when the
+// sentinel's arrives.
 type previousSystemCRServer struct {
-	mu     sync.Mutex
-	bodies []map[string]any
+	mu       sync.Mutex
+	bodies   []map[string]any
+	sentinel chan struct{}
 }
 
 func (s *previousSystemCRServer) received() []map[string]any {
@@ -45,7 +49,7 @@ func (s *previousSystemCRServer) received() []map[string]any {
 
 func newPreviousSystemCRMirror(t *testing.T) (ChangeRequestService, *previousSystemCRServer) {
 	t.Helper()
-	srv := &previousSystemCRServer{}
+	srv := &previousSystemCRServer{sentinel: make(chan struct{}, 1)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/change-requests/"+uuidToSysid(testUUID), func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -53,16 +57,37 @@ func newPreviousSystemCRMirror(t *testing.T) (ChangeRequestService, *previousSys
 		srv.mu.Lock()
 		srv.bodies = append(srv.bodies, body)
 		srv.mu.Unlock()
+		if body["title"] == crMirrorSentinel {
+			srv.sentinel <- struct{}{}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"message": "Change request updated", "changeRequest": {"id": "` + uuidToSysid(testUUID) + `", "number": "CHG0001", "createdOn": "2026-01-01 00:00:00"}}`))
 	})
 	return NewServiceNowChangeRequestService(newTestSNClient(t, mux)), srv
 }
 
-// The hold and the service have no field in the previous system's PATCH. A
-// dual-write PATCH that carried only them used to be dispatched anyway: the
-// mirror refused it ("at least one field must be provided") and a write-back
-// failure was recorded for a write that was never going to be made.
+// awaitMirroredWrites sends svc a PATCH of testUUID that is mirrored (a title)
+// and waits until arrived reports it. The write-back dispatcher runs one change
+// request's writes one at a time, in the order they were dispatched, so every
+// write dispatched before the sentinel has finished, and any failure of it has
+// been recorded, by the time the sentinel arrives.
+func awaitMirroredWrites(ctx context.Context, t *testing.T, svc ChangeRequestService, arrived <-chan struct{}) {
+	t.Helper()
+	title := crMirrorSentinel
+	if _, err := svc.PatchChangeRequest(ctx, testUUID, domain.PatchChangeRequestRequest{Title: &title}); err != nil {
+		t.Fatalf("sentinel PATCH refused: %v", err)
+	}
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sentinel PATCH never reached the previous system")
+	}
+}
+
+// The hold and the service have no field in the previous system's PATCH, and
+// its adapter refuses a request that names them. A dual-write PATCH that carries
+// only them is therefore not dispatched at all: nothing is sent and no
+// write-back failure is recorded.
 func TestChangeRequestService_PatchChangeRequest_PostgresOnlyFieldsAreNotMirrored(t *testing.T) {
 	reason := "waiting for the customer's maintenance window"
 	onHold, offHold := true, false
@@ -88,37 +113,35 @@ func TestChangeRequestService_PatchChangeRequest_PostgresOnlyFieldsAreNotMirrore
 			if _, err := svc.PatchChangeRequest(ctx, testUUID, req); err != nil {
 				t.Fatalf("PATCH refused: %v", err)
 			}
-			time.Sleep(150 * time.Millisecond) // the dispatch is asynchronous; give a wrongly-fired one time to show
+			awaitMirroredWrites(ctx, t, svc, server.sentinel)
 			if got := failures.count(); got != 0 {
 				t.Errorf("write-back failures = %d, want 0", got)
 			}
-			if got := server.received(); len(got) != 0 {
-				t.Errorf("the previous system received %v, want nothing", got)
+			if got := server.received(); len(got) != 1 {
+				t.Errorf("the previous system received %v, want only the sentinel", got)
 			}
 		})
 	}
 
 	t.Run("with a mirrored field: only that field goes out", func(t *testing.T) {
-		title := "new title"
 		mirror, server := newPreviousSystemCRMirror(t)
 		failures := &recordingSNWritebackFailures{}
 		svc := NewChangeRequestServiceWithSNWriteback(repo, stubUserRepo{}, mirror, NewSNWritebackDispatcher(failures))
-		req := domain.PatchChangeRequestRequest{Title: &title, OnHold: &onHold, OnHoldReason: &reason, ServiceID: &svcID}
+		title := crMirrorSentinel
+		req := domain.PatchChangeRequestRequest{Title: &title, OnHold: &onHold, OnHoldReason: &reason, ServiceID: &svcID, ServiceOfferingID: &svcID}
 		if _, err := svc.PatchChangeRequest(ctx, testUUID, req); err != nil {
 			t.Fatalf("PATCH refused: %v", err)
 		}
-		deadline := time.Now().Add(2 * time.Second)
-		for len(server.received()) == 0 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-server.sentinel:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the PATCH never reached the previous system")
 		}
 		got := server.received()
 		if len(got) != 1 {
 			t.Fatalf("the previous system received %d PATCHes, want 1", len(got))
 		}
-		if got[0]["title"] != title {
-			t.Errorf("mirrored title = %v, want %q", got[0]["title"], title)
-		}
-		for _, k := range []string{"onHold", "onHoldReason", "serviceId"} {
+		for _, k := range []string{"onHold", "onHoldReason", "serviceId", "serviceOfferingId"} {
 			if _, ok := got[0][k]; ok {
 				t.Errorf("mirrored body carries %q: %v", k, got[0])
 			}
@@ -130,27 +153,30 @@ func TestChangeRequestService_PatchChangeRequest_PostgresOnlyFieldsAreNotMirrore
 }
 
 // On the data source that talks to the previous system directly, a PATCH that
-// names only the service or the hold has nothing to send: it is refused in words
-// that say so instead of "at least one field must be provided", and the previous
-// system is not called.
+// names the service or the hold is refused, alone or beside a field that data
+// source sends, in words that name them, and the previous system is not called.
 func TestSNChangeRequestService_PatchChangeRequest_RefusesFieldsItCannotSend(t *testing.T) {
 	onHold := true
 	reason := "r"
+	title := "t"
 	svcID := "66666666-7777-8888-9999-000000000000"
 	for name, tc := range map[string]struct {
 		req  domain.PatchChangeRequestRequest
 		want string
 	}{
-		"service":          {domain.PatchChangeRequestRequest{ServiceID: &svcID}, "serviceId is not supported on the ServiceNow data source"},
-		"offering":         {domain.PatchChangeRequestRequest{ServiceOfferingID: &svcID}, "serviceOfferingId is not supported on the ServiceNow data source"},
-		"hold with reason": {domain.PatchChangeRequestRequest{OnHold: &onHold, OnHoldReason: &reason}, "onHold, onHoldReason are not supported on the ServiceNow data source"},
-		"nothing at all":   {domain.PatchChangeRequestRequest{}, "at least one field must be provided"},
+		"service":             {domain.PatchChangeRequestRequest{ServiceID: &svcID}, "serviceId is not supported on the ServiceNow data source"},
+		"offering":            {domain.PatchChangeRequestRequest{ServiceOfferingID: &svcID}, "serviceOfferingId is not supported on the ServiceNow data source"},
+		"hold with reason":    {domain.PatchChangeRequestRequest{OnHold: &onHold, OnHoldReason: &reason}, "onHold, onHoldReason are not supported on the ServiceNow data source"},
+		"hold beside a title": {domain.PatchChangeRequestRequest{Title: &title, OnHold: &onHold}, "onHold is not supported on the ServiceNow data source"},
+		"service beside a title": {domain.PatchChangeRequestRequest{Title: &title, ServiceID: &svcID, ServiceOfferingID: &svcID},
+			"serviceId, serviceOfferingId are not supported on the ServiceNow data source"},
+		"nothing at all": {domain.PatchChangeRequestRequest{}, "at least one field must be provided"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc, server := newPreviousSystemCRMirror(t)
 			_, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), testUUID, tc.req)
 			var ve *apierror.ValidationError
-			if !errors.As(err, &ve) || !strings.Contains(ve.Msg, tc.want) {
+			if !errors.As(err, &ve) || ve.Msg != tc.want {
 				t.Fatalf("error = %v, want a ValidationError saying %q", err, tc.want)
 			}
 			if got := server.received(); len(got) != 0 {

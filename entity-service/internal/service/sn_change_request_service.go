@@ -1073,8 +1073,9 @@ type snPatchChangeRequestPayload struct {
 
 // snUnforwardedChangeRequestPatchFields names the fields of req that
 // snPatchChangeRequestPayload has no field for (serviceId, serviceOfferingId,
-// onHold, onHoldReason), in that order. Sent with a field this data source does
-// forward, they are not written; sent alone, PatchChangeRequest refuses them.
+// onHold, onHoldReason), in that order. PatchChangeRequest refuses a request
+// that carries any of them, whatever else it carries, rather than leave them
+// unwritten.
 func snUnforwardedChangeRequestPatchFields(req domain.PatchChangeRequestRequest) []string {
 	var names []string
 	if req.ServiceID != nil {
@@ -1127,6 +1128,15 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	if req.ImplementationDeviation != nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: implementationDeviationNotOnServiceNowMsg}
 	}
+	// The service and the hold have no field in this data source's PATCH
+	// payload either: refused, never dropped.
+	if unforwarded := snUnforwardedChangeRequestPatchFields(req); len(unforwarded) > 0 {
+		verb := "is"
+		if len(unforwarded) > 1 {
+			verb = "are"
+		}
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: strings.Join(unforwarded, ", ") + " " + verb + " not supported on the ServiceNow data source"}
+	}
 	// WSO2's answer to a time the customer proposed lives in PostgreSQL (customer_updated_on /
 	// customer_updated_date_confirmation): ServiceNow is the authority on this data source, and
 	// its own flow answers it there.
@@ -1146,16 +1156,6 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 		req.RollbackDurationText == nil &&
 		req.DeploymentProductIDs == nil && req.Comment == nil && req.WorkNote == nil &&
 		req.DurationInput == nil && req.IsPlanningVisibleToCustomers == nil {
-		// The service and the hold have no field in this data source's PATCH
-		// payload. A request that carries nothing else would otherwise go out
-		// empty, so it is refused in words that say why.
-		if unforwarded := snUnforwardedChangeRequestPatchFields(req); len(unforwarded) > 0 {
-			verb := "is"
-			if len(unforwarded) > 1 {
-				verb = "are"
-			}
-			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: strings.Join(unforwarded, ", ") + " " + verb + " not supported on the ServiceNow data source"}
-		}
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 

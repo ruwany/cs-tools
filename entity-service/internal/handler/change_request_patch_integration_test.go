@@ -14,25 +14,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// PATCH /change-requests/{id} sent as real JSON through the real handler, the
-// real dual-write service and the real repository, against PostgreSQL. Only the
-// previous system's mirror is stubbed (it records what it is sent). Covers:
-//   - an explicit null clears a field (it used to read as "not provided");
-//   - a PATCH that only sets the service is accepted (it used to be refused);
-//   - priority: an unknown value is a 400 (it used to be a 500 from the enum
-//     cast) and planning is refused (it used to be stored);
-//   - a PATCH that only puts the change on hold is not sent to the mirror.
+// PATCH and POST /change-requests sent as real JSON through the real handler,
+// the real change request services and the real repository, against
+// PostgreSQL. Only the previous system is stubbed (it records what it is sent).
+// Covers:
+//   - an explicit null clears a field, and is a PATCH on its own;
+//   - a PATCH that only sets the service is accepted;
+//   - priority: an unknown value is a 400 and so is planning, on PATCH and on
+//     both creates (impact and risk too on create), and nothing is written;
+//   - a PATCH that only sets the service or the hold is not sent to the
+//     previous system.
 //
 // Skipped without CHANGE_REQUEST_TEST_DSN, the repository package's convention.
 //
-//	CHANGE_REQUEST_TEST_DSN=postgres://... go test ./internal/handler/ -run ChangeRequestPatchIntegration -count=1 -p 1
+//	CHANGE_REQUEST_TEST_DSN=postgres://... go test ./internal/handler/ -run 'ChangeRequestPatchIntegration|ChangeRequestCreateLevelsIntegration' -count=1 -p 1
 
 package handler
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,21 +57,47 @@ const (
 	cpiSubject   = "cr-patch-null-service-priority integration test"
 	cpiServiceID = "c9000000-0000-0000-0000-000000000001"
 	cpiEmail     = "cpi-engineer@test.local"
+	// cpiSentinelTitle is the title of the PATCH mirrorQuiet sends.
+	cpiSentinelTitle = cpiSubject + " (sentinel)"
 )
 
-// cpiMirror stands in for the previous system's change request service the
-// dual-write service mirrors a PATCH to. Only PatchChangeRequest is reachable.
+// cpiMirror stands in for the previous system's change request service. It
+// records every PATCH it is sent (signalling sentinel when the sentinel arrives)
+// and answers a create with a fresh id and number.
 type cpiMirror struct {
 	service.ChangeRequestService
-	mu    sync.Mutex
-	calls []domain.PatchChangeRequestRequest
+	mu       sync.Mutex
+	calls    []domain.PatchChangeRequestRequest
+	creates  []domain.CreateChangeRequestRequest
+	sentinel chan struct{}
 }
 
 func (m *cpiMirror) PatchChangeRequest(_ context.Context, id string, req domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.calls = append(m.calls, req)
+	m.mu.Unlock()
+	if req.Title != nil && *req.Title == cpiSentinelTitle {
+		m.sentinel <- struct{}{}
+	}
 	return domain.PatchChangeRequestResponse{ChangeRequest: domain.ChangeRequest{SearchChangeRequestView: domain.SearchChangeRequestView{ID: id}}}, nil
+}
+
+func (m *cpiMirror) CreateChangeRequest(_ context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+	m.mu.Lock()
+	m.creates = append(m.creates, req)
+	m.mu.Unlock()
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	h := hex.EncodeToString(b)
+	resp := domain.CreateChangeRequestResponse{Message: "created"}
+	resp.ChangeRequest.ID = fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
+	resp.ChangeRequest.Number = "CPI" + h[:12]
+	resp.ChangeRequest.CreatedBy = cpiEmail
+	return resp, nil
 }
 
 func (m *cpiMirror) received() []domain.PatchChangeRequestRequest {
@@ -75,12 +106,21 @@ func (m *cpiMirror) received() []domain.PatchChangeRequestRequest {
 	return append([]domain.PatchChangeRequestRequest(nil), m.calls...)
 }
 
+func (m *cpiMirror) createsReceived() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.creates)
+}
+
 type changeRequestPatchEnv struct {
 	pool   *pgxpool.Pool
 	repo   repository.ChangeRequestRepository
 	mirror *cpiMirror
-	mux    *http.ServeMux
-	token  string
+	// mux serves PATCH and POST through the dual-write service (the create
+	// writes the previous system first); plainMux serves POST through the
+	// PostgreSQL-only service.
+	mux, plainMux *http.ServeMux
+	token         string
 }
 
 func newChangeRequestPatchEnv(t *testing.T) *changeRequestPatchEnv {
@@ -112,21 +152,29 @@ func newChangeRequestPatchEnv(t *testing.T) *changeRequestPatchEnv {
 	}
 
 	repo := repository.NewChangeRequestRepository(scoped)
-	mirror := &cpiMirror{}
+	users := repository.NewUserRepository(pool)
+	mirror := &cpiMirror{sentinel: make(chan struct{}, 1)}
 	dispatcher := service.NewSNWritebackDispatcher(repository.NewSNWritebackFailureRepository(pool))
-	h := NewChangeRequestHandler(service.NewChangeRequestServiceWithSNWriteback(repo, repository.NewUserRepository(pool), mirror, dispatcher))
+	h := NewChangeRequestHandler(service.NewChangeRequestServiceWithSNWriteback(repo, users, mirror, dispatcher))
+	plain := NewChangeRequestHandler(service.NewChangeRequestService(repo, users))
 
-	mux := http.NewServeMux()
 	// System identity stands in for the identity middleware's internal-caller
 	// scope (the CSM BFF is an internal caller); UserIDToken is the real
 	// middleware that carries the portal user's x-user-id-token.
-	mux.Handle("PATCH /change-requests/{id}", middleware.UserIDToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.PatchChangeRequest(w, r.WithContext(repository.WithSystemIdentity(r.Context())))
-	})))
+	asSystem := func(next http.HandlerFunc) http.Handler {
+		return middleware.UserIDToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next(w, r.WithContext(repository.WithSystemIdentity(r.Context())))
+		}))
+	}
+	mux := http.NewServeMux()
+	mux.Handle("PATCH /change-requests/{id}", asSystem(h.PatchChangeRequest))
+	mux.Handle("POST /change-requests", asSystem(h.CreateChangeRequest))
+	plainMux := http.NewServeMux()
+	plainMux.Handle("POST /change-requests", asSystem(plain.CreateChangeRequest))
 
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"` + cpiEmail + `"}`))
-	return &changeRequestPatchEnv{pool: pool, repo: repo, mirror: mirror, mux: mux, token: header + "." + payload + ".sig"}
+	return &changeRequestPatchEnv{pool: pool, repo: repo, mirror: mirror, mux: mux, plainMux: plainMux, token: header + "." + payload + ".sig"}
 }
 
 func cpiStr(s string) *string { return &s }
@@ -153,20 +201,45 @@ func (e *changeRequestPatchEnv) create(t *testing.T) string {
 	return resp.ChangeRequest.ID
 }
 
-// patch sends body to PATCH /change-requests/{id} the way the CSM BFF forwards
-// it, and returns the status and the response's message.
-func (e *changeRequestPatchEnv) patch(t *testing.T, id, body string) (int, string) {
+// send sends body to method path on mux the way the CSM BFF forwards it, and
+// returns the status and the response's message.
+func (e *changeRequestPatchEnv) send(t *testing.T, mux *http.ServeMux, method, path, body string) (int, string) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPatch, "/change-requests/"+id, strings.NewReader(body))
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-user-id-token", e.token)
 	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
+	mux.ServeHTTP(rec, req)
 	var out struct {
 		Message string `json:"message"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	return rec.Code, out.Message
+}
+
+func (e *changeRequestPatchEnv) patch(t *testing.T, id, body string) (int, string) {
+	t.Helper()
+	return e.send(t, e.mux, http.MethodPatch, "/change-requests/"+id, body)
+}
+
+// mirrorQuiet returns every PATCH the previous system has been sent, once all
+// of those dispatched for id have arrived. It sends one more PATCH for id that
+// is mirrored (a title) and waits for it: the write-back dispatcher runs one
+// change request's writes one at a time, in the order they were dispatched, so
+// a write dispatched before it has finished by the time it arrives. The
+// sentinel itself is left out.
+func (e *changeRequestPatchEnv) mirrorQuiet(t *testing.T, id string) []domain.PatchChangeRequestRequest {
+	t.Helper()
+	if code, msg := e.patch(t, id, `{"title": "`+cpiSentinelTitle+`"}`); code != http.StatusOK {
+		t.Fatalf("sentinel PATCH = %d %q, want 200", code, msg)
+	}
+	select {
+	case <-e.mirror.sentinel:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sentinel PATCH never reached the previous system")
+	}
+	all := e.mirror.received()
+	return all[:len(all)-1]
 }
 
 type cpiRow struct {
@@ -251,8 +324,7 @@ func TestChangeRequestPatchIntegration_ServiceAloneIsAPatch(t *testing.T) {
 	if got := e.row(t, id).ServiceID; got == nil || *got != cpiServiceID {
 		t.Fatalf("service_id = %v, want %s", got, cpiServiceID)
 	}
-	time.Sleep(150 * time.Millisecond) // the mirror dispatch is asynchronous
-	if got := e.mirror.received(); len(got) != 0 {
+	if got := e.mirrorQuiet(t, id); len(got) != 0 {
 		t.Errorf("a service-only PATCH was sent to the previous system: %+v", got)
 	}
 }
@@ -262,8 +334,8 @@ func TestChangeRequestPatchIntegration_PriorityIsValidated(t *testing.T) {
 	id := e.create(t)
 	for _, p := range []string{"planning", "urgent"} {
 		code, msg := e.patch(t, id, `{"priority": "`+p+`"}`)
-		if code != http.StatusBadRequest {
-			t.Errorf("priority %q = %d %q, want 400", p, code, msg)
+		if code != http.StatusBadRequest || msg != "priority must be one of critical, high, moderate or low" {
+			t.Errorf("priority %q = %d %q, want the 400 naming the priorities", p, code, msg)
 		}
 		if got := e.row(t, id).Priority; got == nil || *got != "HIGH" {
 			t.Errorf("priority %q changed the stored priority to %v", p, got)
@@ -290,24 +362,6 @@ func TestChangeRequestPatchIntegration_PriorityIsValidated(t *testing.T) {
 	}
 }
 
-// The repository refuses an unknown priority itself (400, not the enum cast's
-// 500), for any caller that reaches it without the service's check.
-func TestChangeRequestPatchIntegration_RepositoryRefusesUnknownPriority(t *testing.T) {
-	e := newChangeRequestPatchEnv(t)
-	id := e.create(t)
-	for _, p := range []domain.ChangeRequestPriority{"planning", "urgent"} {
-		pp := &p
-		_, err := e.repo.PatchChangeRequest(repository.WithSystemIdentity(context.Background()), id,
-			domain.PatchChangeRequestRequest{Priority: &pp}, cpiEmail)
-		if err == nil {
-			t.Fatalf("priority %q was accepted", p)
-		}
-		if !strings.Contains(err.Error(), "is not a change request priority") {
-			t.Errorf("priority %q: error %q, want the repository's validation message", p, err)
-		}
-	}
-}
-
 func TestChangeRequestPatchIntegration_HoldIsNotMirrored(t *testing.T) {
 	e := newChangeRequestPatchEnv(t)
 	id := e.create(t)
@@ -317,8 +371,7 @@ func TestChangeRequestPatchIntegration_HoldIsNotMirrored(t *testing.T) {
 	if code, msg := e.patch(t, id, `{"onHold": false}`); code != http.StatusOK {
 		t.Fatalf("PATCH off hold = %d %q, want 200", code, msg)
 	}
-	time.Sleep(150 * time.Millisecond) // the mirror dispatch is asynchronous
-	if got := e.mirror.received(); len(got) != 0 {
+	if got := e.mirrorQuiet(t, id); len(got) != 0 {
 		t.Errorf("a hold-only PATCH was sent to the previous system: %+v", got)
 	}
 	var failures int
@@ -329,5 +382,58 @@ func TestChangeRequestPatchIntegration_HoldIsNotMirrored(t *testing.T) {
 	}
 	if failures != 0 {
 		t.Errorf("write-back failures = %d, want 0", failures)
+	}
+}
+
+// Both creates refuse a priority, impact or risk the enum columns have no value
+// for, or that this API does not set (planning), with a 400 naming the field,
+// and write nothing (the create that writes the previous system first does not
+// call it). A value they accept is stored.
+func TestChangeRequestCreateLevelsIntegration_BothCreates(t *testing.T) {
+	e := newChangeRequestPatchEnv(t)
+	countRows := func() int {
+		var n int
+		if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM work_item WHERE subject = $1`, cpiSubject).Scan(&n); err != nil {
+			t.Fatalf("count change requests: %v", err)
+		}
+		return n
+	}
+	const priorityMsg = "priority must be one of critical, high, moderate or low"
+	for name, mux := range map[string]*http.ServeMux{"PostgreSQL only": e.plainMux, "previous system first": e.mux} {
+		t.Run(name, func(t *testing.T) {
+			for field, want := range map[string]string{
+				`"priority": "planning"`: priorityMsg,
+				`"priority": "urgent"`:   priorityMsg,
+				`"impact": "severe"`:     "impact must be one of high, medium or low",
+				`"risk": "extreme"`:      "risk must be one of high, moderate or low",
+			} {
+				rowsBefore, createsBefore := countRows(), e.mirror.createsReceived()
+				code, msg := e.send(t, mux, http.MethodPost, "/change-requests",
+					`{"subject": "`+cpiSubject+`", "type": "normal", `+field+`}`)
+				if code != http.StatusBadRequest || msg != want {
+					t.Errorf("%s = %d %q, want 400 %q", field, code, msg, want)
+				}
+				if rowsBefore != countRows() || createsBefore != e.mirror.createsReceived() {
+					t.Errorf("%s: a refused create wrote a change request or called the previous system", field)
+				}
+			}
+
+			code, msg := e.send(t, mux, http.MethodPost, "/change-requests",
+				`{"subject": "`+cpiSubject+`", "type": "normal", "priority": "low", "impact": "medium", "risk": "moderate"}`)
+			if code != http.StatusCreated {
+				t.Fatalf("a create with settable values = %d %q, want 201", code, msg)
+			}
+			var priority, impact, risk string
+			if err := e.pool.QueryRow(context.Background(), `
+				SELECT cr.priority::text, cr.impact::text, cr.risk::text
+				  FROM change_request cr JOIN work_item wi ON wi.id = cr.id
+				 WHERE wi.subject = $1 ORDER BY wi.created_on DESC LIMIT 1`, cpiSubject,
+			).Scan(&priority, &impact, &risk); err != nil {
+				t.Fatalf("read back the created change request: %v", err)
+			}
+			if priority != "LOW" || impact != "MEDIUM" || risk != "MODERATE" {
+				t.Errorf("stored priority %s, impact %s, risk %s, want LOW, MEDIUM, MODERATE", priority, impact, risk)
+			}
+		})
 	}
 }

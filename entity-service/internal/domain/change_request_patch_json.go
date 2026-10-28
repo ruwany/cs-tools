@@ -27,10 +27,11 @@ import (
 // explicit null is a value of its own, and what setting each to "null" means
 // on the struct: a non-nil outer pointer that holds nil.
 //
-// The pointer-to-pointer fields are "clear". environmentIds is listed only so
-// that `"environmentIds": null` is refused like any other value of a field
-// that is no longer accepted. deploymentIds and deploymentProductIds are NOT
-// listed: their null stays "omitted" (an empty array is how a list is cleared).
+// On the pointer-to-pointer fields that is "clear", except customerGroupId,
+// which is listed (with environmentIds) so that its null is refused like any
+// other value of a field that is no longer accepted. deploymentIds and
+// deploymentProductIds are NOT listed: their null stays "omitted" (an empty
+// array is how a list is cleared), as on every other plain pointer field.
 var changeRequestPatchNullable = []struct {
 	name    string
 	setNull func(*PatchChangeRequestRequest)
@@ -51,11 +52,10 @@ var changeRequestPatchNullable = []struct {
 // from an omitted one, so `{"implementationPlan": null}` clears the plan.
 //
 // encoding/json decodes null into a pointer by setting the pointer itself to
-// nil, so a **string field came out nil -- "not provided" -- and a PATCH whose
-// only field was a null was refused with "at least one field must be provided".
-// The service, the repository and the previous system's adapter already treat a
-// non-nil outer pointer holding nil as "clear"; this is what lets an HTTP
-// request reach them in that shape. Same approach as PatchOutageRequest.
+// nil, which for a **string field is "not provided". The service, the
+// repository and the previous system's adapter treat a non-nil outer pointer
+// holding nil as "clear"; this is what lets an HTTP request reach them in that
+// shape. Same approach as PatchOutageRequest.
 //
 // Unknown fields are still rejected, as decodeRequest's DisallowUnknownFields
 // would: a custom UnmarshalJSON is handed the raw object and the outer

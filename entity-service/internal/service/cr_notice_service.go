@@ -319,9 +319,9 @@ func (s *crNoticeService) planDateNotice(ctx context.Context, change repository.
 // touching work_item leaves the previous work_item editor standing in as the
 // actor, and a later edit between the trigger firing and this read replaces
 // them; either can suppress a genuine customer date or admit a WSO2 one.
-// Closing it for the sync's own writes needs csm-sync to carry ServiceNow's
-// sys_updated_by onto change_request; tracked separately. The approval notices
-// do not use the actor at all, so only this one branch is affected.
+// Closing it for the sync's own writes needs csm-sync to carry the previous
+// system's last-writer field onto change_request. The approval notices do not
+// use the actor at all, so only this one branch is affected.
 func (s *crNoticeService) crPlanDateActor(ctx context.Context, change repository.OutboxChange, details repository.CRNoticeDetails) (repository.CRNoticeActor, error) {
 	userID, ok := crRecordedProposer(change.Snapshot)
 	if !ok {

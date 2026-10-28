@@ -218,9 +218,9 @@ func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDe
 }
 
 // crNoticeActorNameSQL is the name a notice gives its actor, the "user" row
-// aliased a. Last name first: the ServiceNow templates interpolate the two name
-// pills in that order, and a port that quietly reorders them is a port that
-// reads differently from the mail it replaces.
+// aliased a. Last name first: the previous system's templates interpolate the
+// two name pills in that order, and a port that quietly reorders them is a port
+// that reads differently from the mail it replaces.
 const crNoticeActorNameSQL = `COALESCE(
 		           NULLIF(TRIM(COALESCE(a.last_name, '') || ' ' || COALESCE(a.first_name, '')), ''),
 		           NULLIF(TRIM(COALESCE(a.name, '')), ''),

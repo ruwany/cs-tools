@@ -87,9 +87,14 @@ func TestChangeRequestService_PatchChangeRequest_DeviationStaysOutOfTheMirror(t 
 	})
 
 	t.Run("alone: nothing to mirror", func(t *testing.T) {
+		var mirrored []domain.PatchChangeRequestRequest
+		sentinel := make(chan struct{}, 1)
 		mirror := &stubMirrorChangeRequestService{
-			patchChangeRequest: func(context.Context, string, domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
-				t.Error("mirror was called for a PATCH that only carried the deviation")
+			patchChangeRequest: func(_ context.Context, _ string, r domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
+				mirrored = append(mirrored, r)
+				if r.Title != nil && *r.Title == crMirrorSentinel {
+					sentinel <- struct{}{}
+				}
 				return domain.PatchChangeRequestResponse{}, nil
 			},
 		}
@@ -98,7 +103,10 @@ func TestChangeRequestService_PatchChangeRequest_DeviationStaysOutOfTheMirror(t 
 		if _, err := svc.PatchChangeRequest(ctx, testUUID, domain.PatchChangeRequestRequest{ImplementationDeviation: &deviation}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		time.Sleep(150 * time.Millisecond) // the dispatch is asynchronous; give a wrongly-fired one time to show
+		awaitMirroredWrites(ctx, t, svc, sentinel)
+		if len(mirrored) != 1 {
+			t.Errorf("the mirror received %d PATCHes, want only the sentinel: %+v", len(mirrored), mirrored)
+		}
 		if got := failures.count(); got != 0 {
 			t.Errorf("writeback failures = %d, want 0", got)
 		}

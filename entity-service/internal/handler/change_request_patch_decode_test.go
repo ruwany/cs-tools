@@ -69,9 +69,8 @@ func patchChangeRequestOverHTTP(t *testing.T, body string) (*httptest.ResponseRe
 	return w, repo
 }
 
-// An explicit null used to read as "not provided": a body whose only field was
-// a null got a 400 "at least one field must be provided", and one with other
-// fields left the value as it was. It now reaches the repository as "clear".
+// An explicit null reaches the repository as "clear", and a body whose only
+// field is a null is a PATCH.
 func TestPatchChangeRequestOverHTTP_ExplicitNullClears(t *testing.T) {
 	for _, field := range []string{
 		"implementationPlan", "priority", "category", "requestedById",
@@ -109,16 +108,15 @@ func TestPatchChangeRequestOverHTTP_ExplicitNullClears(t *testing.T) {
 	}
 }
 
-// customerGroupId and environmentIds are no longer accepted, "null included":
-// a null used to slip through as omitted.
+// customerGroupId and environmentIds are no longer accepted, null included.
 func TestPatchChangeRequestOverHTTP_RemovedFieldsRefuseNull(t *testing.T) {
-	for _, body := range []string{
-		`{"customerGroupId": null, "title": "t"}`,
-		`{"environmentIds": null, "title": "t"}`,
+	for body, want := range map[string]string{
+		`{"customerGroupId": null, "title": "t"}`: "customerGroupId is no longer accepted",
+		`{"environmentIds": null, "title": "t"}`:  "environmentIds is no longer supported",
 	} {
 		w, repo := patchChangeRequestOverHTTP(t, body)
-		if w.Code != http.StatusBadRequest || repo.called {
-			t.Errorf("%s: status %d (repository reached: %v), want a 400 before the repository", body, w.Code, repo.called)
+		if w.Code != http.StatusBadRequest || repo.called || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("%s: status %d %s (repository reached: %v), want a 400 saying %q before the repository", body, w.Code, w.Body.String(), repo.called, want)
 		}
 	}
 }
@@ -133,8 +131,7 @@ func TestPatchChangeRequestOverHTTP_UnknownFieldStillRefused(t *testing.T) {
 	}
 }
 
-// A PATCH that only sets the service (or only the service offering) used to be
-// refused with "at least one field must be provided".
+// A PATCH that only sets the service (or only the service offering) is a PATCH.
 func TestPatchChangeRequestOverHTTP_ServiceAloneIsAPatch(t *testing.T) {
 	const svcID = "66666666-7777-8888-9999-000000000000"
 	for name, body := range map[string]string{
@@ -154,13 +151,14 @@ func TestPatchChangeRequestOverHTTP_ServiceAloneIsAPatch(t *testing.T) {
 	}
 }
 
-// An unknown priority used to reach the enum cast (a 500); planning, which the
-// enum holds for migrated rows, used to be stored.
+// An unknown priority is a 400 before the repository, and so is planning, which
+// the enum column holds for migrated rows but no write sets.
 func TestPatchChangeRequestOverHTTP_PriorityIsValidated(t *testing.T) {
-	for _, p := range []string{"planning", "PLANNING", "urgent", " high "} {
+	const want = `"priority must be one of critical, high, moderate or low"`
+	for _, p := range []string{"planning", "PLANNING", "urgent", " high ", ""} {
 		w, repo := patchChangeRequestOverHTTP(t, `{"priority": "`+p+`"}`)
-		if w.Code != http.StatusBadRequest || repo.called {
-			t.Errorf("priority %q: status %d (repository reached: %v), want 400", p, w.Code, repo.called)
+		if w.Code != http.StatusBadRequest || repo.called || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("priority %q: status %d %s (repository reached: %v), want 400 %s", p, w.Code, w.Body.String(), repo.called, want)
 		}
 	}
 	for _, p := range []string{"critical", "high", "moderate", "low"} {

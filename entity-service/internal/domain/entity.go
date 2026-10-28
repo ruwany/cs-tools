@@ -4571,7 +4571,10 @@ const (
 )
 
 // CreateChangeRequestRequest is the input for POST /change-requests.
-// Subject is the only required field; all others are optional.
+// Subject and Type are required; all others are optional. Priority, Impact and
+// Risk must each be one of the values its type lists (planning, which a
+// migrated change request can read back as its priority, is not one): anything
+// else is a 400 naming the field, before anything is written.
 type CreateChangeRequestRequest struct {
 	Subject             string                 `json:"subject"`
 	Category            *ChangeRequestCategory `json:"category,omitempty"`
@@ -5050,7 +5053,10 @@ type SearchAccountContactsResponse struct {
 }
 
 // PatchChangeRequestRequest is the request body for PATCH /change-requests/{id}.
-// All fields are optional, but at least one must be provided.
+// All fields are optional, but at least one must be provided. An explicit null
+// clears the pointer-to-pointer fields of the field-parity block below, except
+// CustomerGroupID, and counts as a field; CustomerGroupID and EnvironmentIDs
+// refuse it; on every other field it is read as omitted.
 type PatchChangeRequestRequest struct {
 	Title              *string              `json:"title,omitempty"`
 	Description        *string              `json:"description,omitempty"`
@@ -5189,22 +5195,29 @@ type PatchChangeRequestRequest struct {
 	// never mirrored to the previous system.
 	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
 
-	// The fields below are the change-request field-parity additions. Except
-	// Comment and WorkNote (journal entries, append-only, cannot be cleared),
-	// every one of them uses a pointer-to-pointer to distinguish three states:
+	// The fields below are the change-request field-parity additions.
+	// ImplementationPlan, Priority, Category, RequestedByID,
+	// AffectedServicesText, AffectedComponentsText, RollbackDurationText,
+	// CustomerGroupID and DurationInput are pointers to pointers, to distinguish
+	// three states:
 	//   - nil outer pointer: field omitted -- leave the value unchanged
 	//   - non-nil outer, nil inner: explicit null -- clear the value
 	//   - non-nil outer, non-nil inner: set the value
 	// On the wire an explicit null reaches the struct as the second state
 	// through PatchChangeRequestRequest.UnmarshalJSON
-	// (change_request_patch_json.go): encoding/json alone reads a null as an
-	// omitted field. The tags carry omitempty so a marshalled request (the
-	// write-back failure record) reads back the same way.
-	// DeploymentProductIDs uses a single pointer instead: nil
-	// means omitted (a null too), and any non-nil slice (including an explicitly
-	// empty one) replaces the whole list -- the same convention
-	// CreateIncidentRequest's WatchList already uses, since an array field has
-	// no separate "null" state worth distinguishing from "empty".
+	// (change_request_patch_json.go), and counts as a field: encoding/json alone
+	// reads a null as an omitted field. CustomerGroupID's null is refused like
+	// any other value, and so is EnvironmentIDs' (UnmarshalJSON keeps it as a
+	// non-nil pointer to a nil slice). The tags carry omitempty so a marshalled
+	// request (the write-back failure record) reads back the same way.
+	// DeploymentProductIDs, EnvironmentIDs and DeploymentIDs use a single
+	// pointer instead: nil means omitted (for the first and the last a null
+	// too), and any non-nil slice (including an explicitly empty one) replaces
+	// the whole list -- the same convention CreateIncidentRequest's WatchList
+	// already uses, since an array field has no separate "null" state worth
+	// distinguishing from "empty". Comment and WorkNote are plain pointers:
+	// journal entries, append-only, which cannot be cleared (a null is read as
+	// omitted).
 	ImplementationPlan **string `json:"implementationPlan,omitempty"`
 	// Priority is critical, high, moderate or low. Anything else is a 400,
 	// planning included: rows migrated from the previous system can read back
@@ -5239,10 +5252,11 @@ type PatchChangeRequestRequest struct {
 	// empty or whitespace-only value, and neither can be used to clear anything.
 	Comment  *string `json:"comment,omitempty"`
 	WorkNote *string `json:"workNote,omitempty"`
-	// DurationInput is the calendar duration in whole seconds. It is accepted
-	// only when it exactly matches the effective planned window: PlannedStartOn
-	// if provided in this same request, else the change request's stored start,
-	// and likewise for the end. See CreateChangeRequestRequest.DurationInput.
+	// DurationInput is the calendar duration in whole seconds. The PostgreSQL
+	// data sources have no column for it and refuse any value, null included.
+	// The data source that talks to the previous system directly forwards it (a
+	// null as a null) without checking it against the planned window; a
+	// negative value is a 400.
 	DurationInput **int `json:"durationInput,omitempty"`
 }
 
