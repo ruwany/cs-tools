@@ -5155,6 +5155,10 @@ type PatchChangeRequestRequest struct {
 	// OnHoldReason also accompanies this same request. OnHoldReason may also
 	// be sent alone (OnHold omitted) to edit the reason text of an existing
 	// hold without touching OnHold itself.
+	//
+	// The hold, like ServiceID and ServiceOfferingID, is PostgreSQL-only: it is
+	// never mirrored to the previous system, and the data source that talks to
+	// that system directly refuses a request carrying any of the four (400).
 	OnHold       *bool   `json:"onHold,omitempty"`
 	OnHoldReason *string `json:"onHoldReason,omitempty"`
 	// IsPlanningVisibleToCustomers ("Implementation Plan visible to customers")
