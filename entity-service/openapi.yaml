@@ -7835,6 +7835,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            On the data source that talks to the previous system directly, that system is
+            unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     get:
       summary: Get a single change request by ID.
       description: >-

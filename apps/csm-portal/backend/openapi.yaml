@@ -5950,6 +5950,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: >-
+            Service unavailable: the entity service answered 503 (on the data source that talks
+            to the previous system directly, that system is unavailable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
     get:
       summary: Get a single change request by ID (ServiceNow data source only).
       operationId: getChangeRequest
@@ -6422,6 +6430,14 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: >-
+            Service unavailable: the entity service answered 503 (for example, the previous
+            system it calls first is unavailable).
           content:
             application/json:
               schema:
