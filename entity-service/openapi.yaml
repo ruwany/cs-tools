@@ -25118,7 +25118,8 @@ components:
               nullable: true
               description: >-
                 On the PostgreSQL data source the stored value in lower case: critical,
-                high, moderate, low or planning. On the data source that talks to the
+                high, moderate, low or planning (planning only on rows migrated from the
+                previous system: a PATCH refuses it). On the data source that talks to the
                 previous system directly, critical, high, moderate or low, or the raw
                 label of any other choice.
             category:
@@ -26091,6 +26092,14 @@ components:
       description: >
         Any combination of fields may be supplied; at least one is required.
         Omitted fields are left unchanged.
+        AN EXPLICIT NULL clears implementationPlan, priority, category, requestedById,
+        affectedServicesText, affectedComponentsText and rollbackDurationText, and counts as a
+        field on its own (`{"implementationPlan": null}` alone is a valid request). On every
+        other field a null is read as omitted, except customerGroupId and environmentIds,
+        where it is refused like any other value. The keys are matched without regard to
+        case, as the struct is decoded; one of these seven fields named twice with different
+        capitalisation is a 400. The data source that talks to the previous system directly
+        forwards a null to it as a null.
         APPROVED CHANGE REQUESTS ARE READ-ONLY (PostgreSQL data source): once a change
         request has been approved -- it is in customer_approval, scheduled, implement,
         review, customer_review, closed or rollback, which it reaches only through its CAB
@@ -26153,18 +26162,20 @@ components:
           description: >-
             The IT service (an id from POST /services/search). An id that refers to no service is
             a 400 ("serviceId does not refer to an existing record"). It cannot be cleared: an
-            explicit null is read as omitted. It does not count as a field on its own: a request
-            that carries nothing but serviceId and serviceOfferingId is a 400 ("at least one field
-            must be provided"). PostgreSQL data source only: the data source that talks to the
-            previous system directly ignores it, and it is not mirrored to the previous system.
+            explicit null is read as omitted. It is a field on its own: a request that carries
+            only serviceId is a valid request. PostgreSQL data source only: it is not mirrored to
+            the previous system (a request that carries nothing else the previous system takes is
+            not sent to it at all). The data source that talks to the previous system directly
+            cannot send it: sent with a field it does send, it is not written; sent with nothing
+            else, it is a 400 naming it.
         serviceOfferingId:
           type: string
           format: uuid
           description: >-
             The service offering (an id from POST /service-offerings/search). It is not checked
             against serviceId. An id that refers to no offering is a 400 ("serviceOfferingId does
-            not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it
-            does not count as a field on its own, and it is PostgreSQL data source only.
+            not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it is
+            a field on its own, and it is PostgreSQL data source only.
         assignedEngineerId:
           type: string
           format: uuid
@@ -26336,9 +26347,13 @@ components:
             before changing its state") unless it also sends onHold false. confirmCustomerUpdatedDate
             is refused with the same 400, and a customer's proposed implementation time with a 409
             (errorCode change_request_on_hold); other requests are not affected. Not under the
-            approved-content lock. PostgreSQL data source only: the data source that talks to the
-            previous system directly ignores it (sent with nothing else it is a 400 "at least one
-            field must be provided" there), and it is not mirrored to the previous system.
+            approved-content lock. PostgreSQL data source only: it is not mirrored to the previous
+            system (a request that carries nothing else the previous system takes, such as
+            onHold with onHoldReason, is not sent to it at all, so no write-back failure is
+            recorded). The data source that talks to the previous system directly cannot send it:
+            sent with a field it does send, it is not written; sent with nothing else, it is a 400
+            naming every such field the request carries (onHold, onHoldReason, serviceId,
+            serviceOfferingId).
         onHoldReason:
           type: string
           description: >-
@@ -26386,9 +26401,10 @@ components:
             PostgreSQL data source only.
         implementationPlan:
           type: string
+          nullable: true
           description: >-
             The implementation plan (rich text, stored as sent). An empty string empties it; an
-            explicit null is read as omitted (it does not clear the field).
+            explicit null clears it (the detail then reads null).
         implementationDeviation:
           type: string
           description: >-
@@ -26408,50 +26424,54 @@ components:
             mirrored to the previous system.
         priority:
           type: string
+          nullable: true
           enum: [critical, high, moderate, low]
           description: >-
-            An explicit null is read as omitted, so the priority cannot be cleared through this
-            API.
+            Any other value is a 400 ("priority contains invalid value: ..."), planning included:
+            a change request migrated from the previous system can read back planning (its
+            priority 5), but it is not a value this API sets, so it is refused even when it is
+            the stored value. An explicit null clears the priority.
         category:
           type: string
           enum: [hardware, software, service, system_software, applications_software,
                  network, telecom, documentation, other, regular_release_cloud,
                  hotfix_release_cloud, devops, cloud_computing]
+          nullable: true
           description: >-
-            An explicit null is read as omitted, so the category cannot be cleared through this
-            API.
+            An explicit null clears the category.
         requestedById:
           type: string
           format: uuid
+          nullable: true
           description: >-
-            The requester (a user id). An explicit null is read as omitted, so the requester
-            cannot be cleared through this API. Once the change request has left new, a
+            The requester (a user id). An explicit null clears it. Once the change request has
+            left new, a
             different requester is a 400 when a customer approval or review still ahead would
             then have nobody on the project to ask (the requester never approves their own
             change).
         affectedServicesText:
           type: string
+          nullable: true
           description: >-
-            Free text. An empty string empties it; an explicit null is read as omitted (it does
-            not clear the field).
+            Free text. An empty string empties it; an explicit null clears it.
         affectedComponentsText:
           type: string
+          nullable: true
           description: >-
-            Free text. An empty string empties it; an explicit null is read as omitted (it does
-            not clear the field).
+            Free text. An empty string empties it; an explicit null clears it.
         rollbackDurationText:
           type: string
+          nullable: true
           description: >-
-            Raw, unvalidated free text. An empty string empties it; an explicit null is read as
-            omitted (it does not clear the field).
+            Raw, unvalidated free text. An empty string empties it; an explicit null clears it.
         customerGroupId:
           type: string
           format: uuid
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED: any value but null is a 400 (`customerGroupId is no longer
+            NO LONGER ACCEPTED: any value, null included, is a 400 (`customerGroupId is no longer
             accepted: the customer group is derived from the customer project's registered
-            contacts`); an explicit null is read as omitted. The Customer Group is read-only:
+            contacts`). The Customer Group is read-only:
             it is derived from the registered contacts of the change request's project.
         deploymentIds:
           type: array
@@ -26480,9 +26500,8 @@ components:
             type: string
             format: uuid
           description: >-
-            NO LONGER SUPPORTED. Any value but null (an empty array included) is a 400
-            `environmentIds is no longer supported: deployments carry the environment`; an
-            explicit null is read as omitted.
+            NO LONGER SUPPORTED. Any value, null and an empty array included, is a 400
+            `environmentIds is no longer supported: deployments carry the environment`.
         deploymentProductIds:
           type: array
           maxItems: 100
@@ -26505,12 +26524,13 @@ components:
             type `work_note`). Cannot be empty and cannot clear anything.
         durationInput:
           type: integer
+          nullable: true
           minimum: 0
           description: >-
             Calendar duration in whole seconds. The PostgreSQL data sources refuse any value (400
-            "durationInput is not supported on this data source"). The data source that talks to
-            the previous system directly forwards it as sent, without checking it against the
-            planned window; a negative value is a 400. An explicit null is read as omitted.
+            "durationInput is not supported on this data source"), null included. The data source
+            that talks to the previous system directly forwards it as sent, without checking it
+            against the planned window, and forwards a null as a null; a negative value is a 400.
 
     PatchChangeRequestResponse:
       type: object

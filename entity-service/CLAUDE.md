@@ -3956,6 +3956,36 @@ change-request-specific was added beyond the field on the read model:
   previous system are not migrated today; widening that filter (and the
   `work_item_id` resolution) to `change_request` is what it would take.
 
+### PATCH: explicit null, a service-only request, priority, and what is mirrored
+
+- **An explicit null clears.** `PatchChangeRequestRequest.UnmarshalJSON` (`domain/change_request_patch_json.go`,
+  same approach as `PatchOutageRequest`) turns `"implementationPlan": null` (likewise `priority`, `category`,
+  `requestedById`, `affectedServicesText`, `affectedComponentsText`, `rollbackDurationText`, `durationInput`,
+  `customerGroupId`) into a non-nil outer pointer holding nil, which the repository writes as NULL and the
+  previous system's adapter forwards as null. `encoding/json` alone reads a null as omitted, so before this
+  `{"implementationPlan": null}` was a 400 "at least one field must be provided" and a null beside other fields
+  was silently ignored; the old "explicit null" tests built the struct in Go and never saw it. `environmentIds:
+  null` is now refused like any other value; `deploymentIds` / `deploymentProductIds` null stays "omitted" (an
+  empty array clears a list); a plain `*string` field's null stays "omitted". It keeps `DisallowUnknownFields`
+  itself (a custom `UnmarshalJSON` does not inherit the outer decoder's setting) and refuses one of those keys
+  given twice with different capitalisation. The tags carry `omitempty`, so the marshalled request in a
+  write-back failure record reads back the same.
+- **`serviceId` / `serviceOfferingId` count as fields**: a PATCH that only sets the service is accepted (it was
+  left out of the "at least one field" check).
+- **`priority` is validated** (`validChangeRequestPriority` in the service, `changeRequestPatchPriorityPGLabels`
+  in the repository): critical, high, moderate, low. `planning` is refused although the enum holds it (migration
+  0100, for migrated rows, which read back "planning"); anything else used to reach the enum cast as a 500.
+- **Not mirrored**: `onHold`, `onHoldReason`, `serviceId`, `serviceOfferingId` (the previous system's PATCH
+  payload has no field for them, so they were always dropped there). They are stripped from the dual-write
+  mirror, so a PATCH carrying only them is not dispatched (it used to be refused by the mirror and recorded as a
+  write-back failure). On `DATA_SOURCE=servicenow` a PATCH carrying only them is a 400 naming them ("onHold,
+  onHoldReason are not supported on the ServiceNow data source"); beside a field that data source sends, they are
+  not written, as before.
+- Tests: `domain/change_request_patch_json_test.go`, `handler/change_request_patch_decode_test.go` (real JSON
+  through the handler and the service), `handler/change_request_patch_integration_test.go`
+  (`CHANGE_REQUEST_TEST_DSN`), `service/change_request_service_mirror_test.go` (the real previous-system adapter
+  as the mirror).
+
 ### The approval tables are the sync layer's (state, not status)
 
 `approval_stage` and `approval_stage_approver` mirror ServiceNow's
