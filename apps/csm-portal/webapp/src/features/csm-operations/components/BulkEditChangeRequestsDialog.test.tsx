@@ -457,6 +457,39 @@ describe("BulkEditChangeRequestsDialog — what Request Approval needs", () => {
     expect(project(dialog)).not.toBeRequired();
   }, 20_000);
 
+  it("does not mark the Customer Project where it can't be set here, and says plainly who is skipped", async () => {
+    // A mixed selection: one New with a customer step and no project, one past New in another project (its moves
+    // still include Request Approval). The project is set only when all are New, so the picker is disabled.
+    const dialog = renderDialog([
+      cr("a", { assignedTeam: TEAM, customerApprovalRequired: true }),
+      cr("b", {
+        state: "authorize",
+        assignedTeam: TEAM,
+        project: { id: "proj-b", name: "Beta" },
+        legalNextStates: ["assess", "canceled"],
+      }),
+    ]);
+    await loaded(dialog);
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(project(dialog)).toBeDisabled();
+    expect(project(dialog)).not.toBeRequired();
+    expect(project(dialog)).toHaveAttribute("data-helper-text", "");
+    expect(
+      within(dialog).getByText(
+        "1 of the selected change requests has a customer step ticked and no Customer Project, so it is skipped.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/^Required to request approval/)).not.toBeInTheDocument();
+
+    // The note follows the pick: with the customer's approval taken off, nobody needs a project.
+    pick(dialog, "Customer approval", "Not required");
+    expect(within(dialog).queryByText(/no Customer Project, so it is skipped/)).not.toBeInTheDocument();
+
+    // Not a block on the edit either way.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 change requests" }));
+    expect(onApply).toHaveBeenCalledWith({ state: "assess", customerApprovalRequired: false });
+  }, 20_000);
+
   it("counts a customer step set in the same edit, and a project already stored", async () => {
     const dialog = renderDialog([
       cr("a", { assignedTeam: TEAM }),

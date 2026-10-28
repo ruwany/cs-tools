@@ -306,6 +306,10 @@ export default function BulkEditChangeRequestsDialog({
           ),
       ).length
     : 0;
+  // The Customer Project can be set here only while every selected change request is New ("project"), so only then
+  // is it marked required. Otherwise (a mixed selection) the picker is disabled, and the ones lacking one are named in
+  // a plain note under it instead.
+  const projectRequired = scopeMode === "project" && lackingProjectCount > 0;
   /** "N of the selected change requests have no X": why a field is required to request approval. */
   const lackingHelper = (n: number, what: string): string =>
     `Required to request approval: ${n} of the selected change requests ${n === 1 ? "has" : "have"} ${what}, and without one ${n === 1 ? "it is" : "they are"} skipped.`;
@@ -746,13 +750,18 @@ export default function BulkEditChangeRequestsDialog({
                 projectDisabled={scopeMode !== "project"}
                 idPrefix="bulk-cr"
                 projectClearable={scopeMode === "project"}
-                projectRequired={lackingProjectCount > 0}
+                projectRequired={projectRequired}
                 projectHelperText={
-                  lackingProjectCount > 0
+                  projectRequired
                     ? lackingHelper(lackingProjectCount, "a customer step ticked and no Customer Project")
                     : undefined
                 }
               />
+              {lackingProjectCount > 0 && !projectRequired && (
+                <Typography variant="caption" color="text.secondary">
+                  {`${lackingProjectCount} of the selected change requests ${lackingProjectCount === 1 ? "has" : "have"} a customer step ticked and no Customer Project, so ${lackingProjectCount === 1 ? "it is" : "they are"} skipped.`}
+                </Typography>
+              )}
               {sendScope && (
                 <Typography variant="caption" color="text.secondary">
                   {scopeMode === "project"

@@ -161,9 +161,12 @@ export const ON_HOLD_STATE_SKIPPED = "On hold, so its state can't change. Take i
 export const REQUEST_APPROVAL_NEEDS_TEAM_SKIPPED =
   "No assignment group, so approval can't be requested. Set one in the same edit.";
 
-/** The words for a change request with a customer step ticked and no Customer Project that was asked to request approval. */
+/**
+ * The words for a change request with a customer step ticked and no Customer Project that was asked to request
+ * approval. No "set one in the same edit": a bulk edit sets the project only when every selected one is New.
+ */
 export const REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED =
-  "A customer step is ticked and there is no Customer Project, so approval can't be requested. Set one in the same edit.";
+  "A customer step is ticked and there is no Customer Project, so approval can't be requested until it has one.";
 
 /** What a bulk plan needs to know about one change request (its detail, read just before the run). */
 export type BulkChangeRequestRecord = Partial<
