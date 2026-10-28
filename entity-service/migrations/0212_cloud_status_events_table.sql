@@ -19,7 +19,7 @@
 -- The table and its enum are defined by the legacy straggler
 -- 000086_create_cloud_status_events, which every runner (make migrate,
 -- generate_schema_bootstrap.sh, the compose stack's migrate-and-seed.sh)
--- applies LAST, after every 4-digit file. 0213_cloud_status_event_delivery_lease
+-- applies after every 4-digit file. 0213_cloud_status_event_delivery_lease
 -- alters this table, so on a fresh database it would run before the table
 -- existed and stop the whole run:
 -- `relation "cloud_status_events" does not exist`.
@@ -28,18 +28,25 @@
 -- collation, not by a name comparison that a locale-aware sort could
 -- reorder. It depends on nothing else.
 --
--- Same definition as 000086, every statement guarded: a no-op wherever 000086
--- already ran, and 000086 is a no-op after this one. 000086 stays as it is,
--- since databases have it recorded by filename. See 000086 for the reasoning
--- behind each column, the missing foreign key and the unique key.
+-- Same definition as 000086, the enum, table and index each guarded: a no-op
+-- wherever 000086 already ran, and 000086 is a no-op after this one. 000086
+-- stays as it is, since databases have it recorded by filename. See 000086
+-- for the notes on the columns, the missing foreign key and the unique key.
 --
 -- The plural name is 000086's and 0213 alters it under that name, so it is
 -- kept: see the table-naming note in entity-service/CLAUDE.md.
 --
--- No BEGIN/COMMIT: every statement is guarded, so a run that stops partway
--- is finished by the next one, and migrate-and-seed.sh applies each file with
--- `psql -1` in one transaction with its tracking insert, which a COMMIT here
--- would split.
+-- Where the table already exists, CREATE INDEX IF NOT EXISTS still takes a
+-- SHARE lock on it before it finds the index. That lock waits behind open
+-- writes and holds up the writes queued after it, so lock_timeout makes a
+-- busy table fail the file instead; run it again.
+--
+-- No BEGIN/COMMIT: the three CREATEs are guarded, so a run that stops
+-- partway is finished by the next one, and migrate-and-seed.sh applies this
+-- file with `psql -1` in one transaction with its tracking insert, which a
+-- COMMIT here would split.
+SET lock_timeout = '5s';
+
 DO $$ BEGIN
     -- The `event` string the webhook body carries.
     CREATE TYPE cloud_status_event_enum AS ENUM (
@@ -76,3 +83,5 @@ CREATE TABLE IF NOT EXISTS cloud_status_events (
 CREATE INDEX IF NOT EXISTS idx_cloud_status_events_undelivered
     ON cloud_status_events (created_on)
     WHERE delivered IS FALSE;
+
+RESET lock_timeout;
