@@ -1225,7 +1225,7 @@ describe("EditChangeRequestDialog — the fields the create form sets", () => {
       justification: "<p>The old cluster is end of life.</p>",
       impactDescription: "<p>Ten minutes of read-only traffic.</p>",
       impact: "medium",
-      priority: "moderate" as unknown as BeChangeRequestDetail["priority"],
+      priority: "moderate",
     });
     expect(subject()).toHaveValue("Upgrade the gateway cluster");
     expect(planEditor(/^description/i)).toHaveValue(normalizeLikeEditor("<p>Move the gateway to the new cluster.</p>"));
@@ -1237,9 +1237,12 @@ describe("EditChangeRequestDialog — the fields the create form sets", () => {
     expect(saveButton()).toBeDisabled();
   });
 
-  it("reads a priority sent as an { id, label } ref too", () => {
-    renderDialog({ priority: { id: 2, label: "2 - High" } });
-    expect(select("Priority")).toHaveTextContent("High");
+  it("offers no value for planning, which only a migrated change request carries, and sends no priority for it", () => {
+    const { onSave } = renderDialog({ priority: "planning" });
+    expect(select("Priority")).toHaveTextContent("-- Select --");
+    fireEvent.change(subject(), { target: { value: "Upgrade the gateway cluster to 4.3" } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ title: "Upgrade the gateway cluster to 4.3" });
   });
 
   it.each([

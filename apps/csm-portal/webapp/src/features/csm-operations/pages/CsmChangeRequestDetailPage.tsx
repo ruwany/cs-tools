@@ -85,6 +85,7 @@ import {
   buildCloneChangeRequestNavState,
   changeRequestBlockingReason,
   changeRequestCategoryLabel,
+  changeRequestChoiceLabel,
   noCustomerAskedHelper,
   isChangeRequestCreator,
   pendingCustomerReview,
@@ -1269,14 +1270,14 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               }}
             >
               <MetaCell label="Priority">
-                <Typography variant="body2">{cr.priority?.label || "—"}</Typography>
+                <Typography variant="body2">{changeRequestChoiceLabel(cr.priority)}</Typography>
               </MetaCell>
               <MetaCell label="Requested by"><RefText value={cr.requestedBy} /></MetaCell>
               <MetaCell label="Change request type">
-                <Typography variant="body2">{cr.changeRequestType?.label || "—"}</Typography>
+                <Typography variant="body2">{changeRequestChoiceLabel(cr.changeRequestType)}</Typography>
               </MetaCell>
               <MetaCell label="Likelihood">
-                <Typography variant="body2">{cr.likelihood?.label || "—"}</Typography>
+                <Typography variant="body2">{changeRequestChoiceLabel(cr.likelihood)}</Typography>
               </MetaCell>
               <MetaCell label="Implementation Plan visible to customers">
                 <YesNo value={cr.isPlanningVisibleToCustomers} />

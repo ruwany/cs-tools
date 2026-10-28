@@ -349,8 +349,12 @@ Who the customer is (the **Customer Project**, from which the read-only Customer
 The edit form (`EditChangeRequestDialog`, inline on the detail page) offers every field the create form sets: Subject,
 Type (New only: it decides the approval flow, `CHANGE_REQUEST_TYPE_FROZEN_REASON` after; choosing Emergency unticks both
 customer boxes in the same request, which the backend requires), Impact, Priority (read through
-`changeRequestPriorityValue`: a value, or the previous system's `{ id, label }` ref), Description, Justification and Risk and
-impact analysis (sent as `impactDescription`), beside the fields it already had. Only what changed is sent.
+`changeRequestPriorityValue`; `planning`, which only a change request migrated from the previous system carries, is not one
+of the form's values, so the select starts empty and nothing is sent for it), Description, Justification and Risk and
+impact analysis (sent as `impactDescription`), beside the fields it already had. Only what changed is sent. The detail's
+`priority`, `changeRequestType` and `likelihood` are plain strings, shown under "SRE details" (and the priority in the
+PDF) through `changeRequestChoiceLabel`: a lower-case value (the PostgreSQL data source's) in sentence case, a label of
+the previous system as sent.
 
 Once the change request has been approved (`changeRequestApprovedReadOnlyReason`: Customer Approval, Scheduled, Implement,
 Review, Customer Review, Closed, Rollback -- CAB approval received, or a Standard change scheduled; not Canceled) every

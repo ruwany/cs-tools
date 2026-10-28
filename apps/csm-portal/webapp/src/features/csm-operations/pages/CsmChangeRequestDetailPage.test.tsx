@@ -529,6 +529,36 @@ describe("CsmChangeRequestDetailPage — project, deployments, deployment produc
   });
 });
 
+describe("CsmChangeRequestDetailPage — SRE details: priority, change request type, likelihood", () => {
+  const cell = (label: string): HTMLElement => screen.getByText(label).parentElement!;
+  const openPlan = (cr: BeChangeRequestDetail): void => {
+    mockQueryResult({ data: cr });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /plan/i }));
+  };
+
+  it("shows the values the PostgreSQL data source sends, planning on a migrated change request included", () => {
+    openPlan({ ...BASE_CR, priority: "planning", changeRequestType: "infra", likelihood: "medium" });
+    expect(within(cell("Priority")).getByText("Planning")).toBeInTheDocument();
+    expect(within(cell("Change request type")).getByText("Infra")).toBeInTheDocument();
+    expect(within(cell("Likelihood")).getByText("Medium")).toBeInTheDocument();
+  });
+
+  it("shows a label of the previous system as sent", () => {
+    openPlan({ ...BASE_CR, priority: "5 - Planning", changeRequestType: "Normal", likelihood: "High" });
+    expect(within(cell("Priority")).getByText("5 - Planning")).toBeInTheDocument();
+    expect(within(cell("Change request type")).getByText("Normal")).toBeInTheDocument();
+    expect(within(cell("Likelihood")).getByText("High")).toBeInTheDocument();
+  });
+
+  it("shows a dash for each when the change request has none", () => {
+    openPlan({ ...BASE_CR, priority: null, changeRequestType: null, likelihood: undefined });
+    for (const label of ["Priority", "Change request type", "Likelihood"]) {
+      expect(within(cell(label)).getByText("—")).toBeInTheDocument();
+    }
+  });
+});
+
 describe("CsmChangeRequestDetailPage — blocking-reason header note", () => {
   it("shows 'Awaiting Peer Approval' when the Assess stage is pending or requested", () => {
     mockQueryResult({ data: { ...BASE_CR, state: "assess" } });

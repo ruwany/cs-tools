@@ -29,6 +29,7 @@ import {
   CHANGE_REQUEST_CATEGORY_OPTIONS,
   changeRequestCategoryLabel,
   changeRequestCategoryValue,
+  changeRequestChoiceLabel,
   changeRequestScopeLockedReason,
   changeRequestApprovedReadOnlyReason,
   CHANGE_REQUEST_APPROVED_READ_ONLY_REASON,
@@ -1420,6 +1421,32 @@ describe("changeRequestPriorityValue / changeRequestImpactValue", () => {
     expect(changeRequestPriorityValue("planning")).toBe("");
     expect(changeRequestImpactValue(undefined)).toBe("");
     expect(changeRequestImpactValue("extreme")).toBe("");
+  });
+});
+
+describe("changeRequestChoiceLabel (priority, change request type, likelihood)", () => {
+  it.each([
+    ["critical", "Critical"],
+    ["high", "High"],
+    ["moderate", "Moderate"],
+    ["low", "Low"],
+    ["planning", "Planning"],
+    ["infra", "Infra"],
+    ["general", "General"],
+    ["medium", "Medium"],
+  ])("shows the PostgreSQL data source's %s as %s", (value, label) => {
+    expect(changeRequestChoiceLabel(value)).toBe(label);
+  });
+
+  it("shows a label of the previous system as sent", () => {
+    expect(changeRequestChoiceLabel("5 - Planning")).toBe("5 - Planning");
+    expect(changeRequestChoiceLabel("Normal")).toBe("Normal");
+  });
+
+  it("is a dash when there is none", () => {
+    expect(changeRequestChoiceLabel(null)).toBe("—");
+    expect(changeRequestChoiceLabel(undefined)).toBe("—");
+    expect(changeRequestChoiceLabel("  ")).toBe("—");
   });
 });
 

@@ -2856,7 +2856,13 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * Internal (the backend never returns it to a customer); absent or null when the
    * backing data source has no such field. */
   implementationDeviation?: string | null;
-  priority?: { id: number; label: string } | null;
+  /** On the PostgreSQL data source the stored value in lower case: critical, high,
+   * moderate or low, or planning on a change request migrated from the previous system
+   * (no create or PATCH sets it). The data source that talks to the previous system
+   * directly sends critical, high, moderate or low, or that system's own label for any
+   * other choice. Shown through `changeRequestChoiceLabel`; the edit form reads it
+   * through `changeRequestPriorityValue`. */
+  priority?: string | null;
   /** The `category` enum value (`other`, `devops`, ...) as the Postgres data
    * source returns it, or an `{ id, label }` ref as the ServiceNow-backed
    * response did — read both through `changeRequestCategoryValue` /
@@ -2887,9 +2893,14 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * this group (see `CHANGES-cr-field-parity.md`'s "group C2"). Do not add
    * editable controls for these without first adding the write support at
    * every lower layer.
+   *
+   * On the PostgreSQL data source the stored value in lower case
+   * (`changeRequestType`: infra or general; `likelihood`: low, medium or high);
+   * the data source that talks to the previous system directly sends that
+   * system's own label. Shown through `changeRequestChoiceLabel`.
    */
-  changeRequestType?: { id: number; label: string } | null;
-  likelihood?: { id: number; label: string } | null;
+  changeRequestType?: string | null;
+  likelihood?: string | null;
   /**
    * "Implementation Plan visible to customers" in this portal's UI. Writable
    * on both {@link BeCreateChangeRequestPayload} and

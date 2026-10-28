@@ -1260,6 +1260,18 @@ export function changeRequestImpactValue(impact: string | null | undefined): BeC
   return CHANGE_REQUEST_IMPACT_OPTIONS.find((o) => o.value === lower)?.value ?? "";
 }
 
+/**
+ * How a detail response's `priority`, `changeRequestType` and `likelihood` read ("—" when unset). A
+ * lower-case value, which is what the PostgreSQL data source sends (`moderate`, `planning`, `infra`,
+ * `medium`), is shown in sentence case; anything else is a label of the previous system, sent by the data
+ * source that talks to it directly, and is shown as sent.
+ */
+export function changeRequestChoiceLabel(value: string | null | undefined): string {
+  const raw = value?.trim() ?? "";
+  if (!raw) return "—";
+  return /^[a-z][a-z_]*$/.test(raw) ? sentenceCase(raw) : raw;
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle transitions
 //
