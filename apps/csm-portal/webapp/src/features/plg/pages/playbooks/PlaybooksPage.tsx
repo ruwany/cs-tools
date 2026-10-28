@@ -948,7 +948,8 @@ function ReasonEditor({
   onChange,
 }: {
   options: ChecklistOption[];
-  /** The task has a name, so it will be sent and a blank reason blocks the save. */
+  /** The task has a name, so it will be sent and a blank reason blocks the save:
+   *  only then is each reason marked required. */
   kept: boolean;
   onChange: (options: ChecklistOption[]) => void;
 }) {
@@ -976,7 +977,7 @@ function ReasonEditor({
               <TextField
                 size="small"
                 fullWidth
-                required
+                required={kept}
                 label={`Reason ${index + 1}`}
                 value={option.label}
                 error={blank}

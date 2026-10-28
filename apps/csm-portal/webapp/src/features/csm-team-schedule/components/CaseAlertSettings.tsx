@@ -1481,17 +1481,18 @@ function RoomDialog({
         )}
         <label>
           {/* Required for a new space only: a saved one keeps its URL when
-              this is left empty. */}
+              this is left empty. Never while URLs can't be saved on this
+              server, which disables the box. */}
           <span>
             Google Chat webhook URL
-            {existing ? null : <RequiredMark />}
+            {!existing && webhooksEnabled ? <RequiredMark /> : null}
           </span>
           <input
             type="password"
             autoComplete="off"
             spellCheck={false}
             value={url}
-            required={!existing}
+            required={!existing && webhooksEnabled}
             disabled={!webhooksEnabled}
             onChange={(e) => setUrl(e.target.value)}
             placeholder={`${WEBHOOK_PREFIX}v1/spaces/…`}

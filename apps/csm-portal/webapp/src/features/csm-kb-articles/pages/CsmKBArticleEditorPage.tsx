@@ -24,6 +24,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormHelperText,
   InputLabel,
   MenuItem,
   Select,
@@ -95,7 +96,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
 
   const { data: article, isLoading, isError, error } = useGetKBArticle(id);
   const { data: history } = useGetKBArticleHistory(id);
-  const { data: kbList, isLoading: kbListLoading } = useListKnowledgeBases();
+  const { data: kbList, isLoading: kbListLoading, isError: kbListFailed } = useListKnowledgeBases();
   const { data: teams } = useSearchTeams();
   const createArticle = useCreateKBArticle();
   const patchContent = usePatchKBArticleContent(id);
@@ -126,6 +127,10 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
   // enforces this too (a deactivated KB rejects article creation outright),
   // this just keeps a deactivated one from ever being offered as a choice.
   const activeKnowledgeBases = (kbList?.knowledgeBases ?? []).filter((kb) => kb.active);
+
+  // Marked required only once there is one to pick; with none (or the list
+  // failed), the select is disabled and says why, and Save draft waits.
+  const kbPickable = !kbListLoading && activeKnowledgeBases.length > 0;
 
   const [kbDefaulted, setKbDefaulted] = useState(false);
   if (isCreateMode && !kbDefaulted && activeKnowledgeBases.length) {
@@ -398,7 +403,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 3, maxWidth: 1400, mx: "auto", width: "95%" }}>
           {isCreateMode && (
-            <FormControl size="small" fullWidth required disabled={kbListLoading || savePending}>
+            <FormControl size="small" fullWidth required={kbPickable} disabled={!kbPickable || savePending}>
               <InputLabel id="kb-select-label">Knowledge base</InputLabel>
               <Select labelId="kb-select-label" label="Knowledge base" value={knowledgeBaseId} onChange={handleKbChange}>
                 {activeKnowledgeBases.map((kb) => (
@@ -407,6 +412,13 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
+              {!kbListLoading && !kbPickable && (
+                <FormHelperText>
+                  {kbListFailed
+                    ? "Couldn't load the knowledge bases, so the article can't be saved yet. Try again later."
+                    : "No knowledge base is taking new articles, so the article can't be saved."}
+                </FormHelperText>
+              )}
             </FormControl>
           )}
 
@@ -480,7 +492,12 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
                     Cancel
                   </Button>
                 )}
-                <Button variant="outlined" onClick={handleSaveDraft} disabled={savePending}>
+                <Button
+                  variant="outlined"
+                  onClick={handleSaveDraft}
+                  // Creating needs a knowledge base; the first one is picked as soon as the list loads.
+                  disabled={savePending || (isCreateMode && !knowledgeBaseId)}
+                >
                   {isCreateMode ? "Save draft" : "Save changes"}
                 </Button>
                 {!isCreateMode && (

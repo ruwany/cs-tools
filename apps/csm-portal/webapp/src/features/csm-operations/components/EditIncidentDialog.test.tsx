@@ -309,6 +309,36 @@ describe("EditIncidentDialog required-field markers", () => {
     expect(combobox(/^subcategory$/i)).toBeRequired();
   });
 
+  it("does not mark Subcategory while Category is cleared, since it is disabled until one is picked", () => {
+    render(<EditIncidentDialog incident={IN_PROGRESS} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
+
+    pick(/^category$/i, "-- Select --");
+    expect(combobox(/^subcategory$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(combobox(/^subcategory$/i)).not.toBeRequired();
+    expect(screen.getByText("Pick a category first.")).toBeInTheDocument();
+    // The blank Category is what holds Save back.
+    expect(combobox(/^category$/i)).toBeRequired();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+
+    pick(/^category$/i, "Service Interruption");
+    expect(combobox(/^subcategory$/i)).toBeRequired();
+  });
+
+  it("does not mark a terminal State, whose select is disabled", () => {
+    render(
+      <EditIncidentDialog
+        incident={{ ...IN_PROGRESS, state: "CLOSED" }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(combobox(/^state$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(combobox(/^state$/i)).not.toBeRequired();
+    expect(combobox(/^category$/i)).toBeRequired();
+  });
+
   it("leaves Subcategory optional when the category changes on an incident that had none", () => {
     render(
       <EditIncidentDialog

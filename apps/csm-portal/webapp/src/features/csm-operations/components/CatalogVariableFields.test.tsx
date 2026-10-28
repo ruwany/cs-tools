@@ -326,4 +326,30 @@ describe("CatalogVariableFields — rich-text Description", () => {
     expect(caption.textContent).not.toContain("*");
     expect(screen.getByTestId("rich-text-editor")).not.toHaveAttribute("aria-required");
   });
+
+  it("shows neither on a read-only variable, even a mandatory one, since its editor is disabled", () => {
+    renderFields([{ ...DESCRIPTION, mandatory: true, readOnly: true }]);
+
+    expect(screen.getByText("Description").querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(screen.getByTestId("rich-text-editor")).not.toHaveAttribute("aria-required");
+  });
+});
+
+describe("CatalogVariableFields — read-only variables", () => {
+  it("does not mark a mandatory read-only field required, whatever its kind, since it is disabled", () => {
+    renderFields([
+      { ...NOTES, id: "ro-text", questionText: "Read-only notes", mandatory: true, readOnly: true },
+      { ...TARGET_CLOUD, id: "ro-choice", questionText: "Read-only cloud", mandatory: true, readOnly: true },
+      { ...NOTES, id: "rw-text", questionText: "Editable notes", mandatory: true },
+    ]);
+
+    const notes = screen.getByLabelText(/read-only notes/i);
+    expect(notes).toBeDisabled();
+    expect(notes).not.toBeRequired();
+    const cloud = screen.getByRole("combobox", { name: /read-only cloud/i });
+    expect(cloud).toHaveAttribute("aria-disabled", "true");
+    expect(cloud).not.toBeRequired();
+    // The same kind of variable, editable, is marked.
+    expect(screen.getByLabelText(/editable notes/i)).toBeRequired();
+  });
 });

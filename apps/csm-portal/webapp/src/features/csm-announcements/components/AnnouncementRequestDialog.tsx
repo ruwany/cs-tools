@@ -524,13 +524,16 @@ export default function AnnouncementRequestDialog({
           <>
             {isEditable ? (
               <>
+                {/* Subject and Description are marked only while they can be
+                    edited: locked for a retry, they are what was already sent,
+                    and the note below them says so. */}
                 <TextField
                   label="Subject"
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                   fullWidth
                   size="small"
-                  required
+                  required={!contentLockedForRetry}
                   disabled={contentLockedForRetry}
                 />
                 <Box>
@@ -541,7 +544,7 @@ export default function AnnouncementRequestDialog({
                     sx={{ display: "block", mb: 0.5 }}
                   >
                     Description
-                    <RequiredMark />
+                    {!contentLockedForRetry && <RequiredMark />}
                   </Typography>
                   <Box role="group" aria-labelledby="announcement-request-description-label">
                     <EditorWithSourceToggle
@@ -553,14 +556,16 @@ export default function AnnouncementRequestDialog({
                       maxHeight={320}
                       toolbarVariant="full"
                       disabled={contentLockedForRetry}
-                      ariaRequired
+                      ariaRequired={!contentLockedForRetry}
                     />
                   </Box>
                   {/* Saving accepts an empty description; the next step does not
                       (submit runs a dry-run case, publish creates the real ones). */}
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                    {request.state === "approved" ? "Required to publish." : "Required to submit for approval."}
-                  </Typography>
+                  {!contentLockedForRetry && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                      {request.state === "approved" ? "Required to publish." : "Required to submit for approval."}
+                    </Typography>
+                  )}
                 </Box>
                 {request.kind === "customer" && (
                   <FormControlLabel

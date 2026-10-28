@@ -237,6 +237,11 @@ standard asterisk, so the user can see it before they try. One convention, no ha
   `aria-labelledby` at it. A placeholder is not a name.
 - **Conditional** requirements are marked only while they apply (`required={isTransitioningToResolved}`), and any
   caption that explains them is shown under the same condition.
+- **Never on a field the user can't fill** in the current state: one that is disabled, read-only or locked (a terminal
+  incident's State, an announcement locked for a retry, a read-only catalog variable) or has nothing to pick (no
+  knowledge base to add an article to). Mark it once it can be filled; where the user needs to know why it stays blank,
+  say so in plain text instead (the bulk edit's Customer Project on a mixed selection). A field disabled only while its
+  own form is saving keeps its mark.
 - **Needed for a later step, not for saving** (a change request's Assignment group before Request Approval, an
   announcement's description before Submit / Publish): the asterisk plus helper text naming the step ("Required to request
   approval."); saving stays possible. The step itself is what is disabled or refused.
@@ -246,8 +251,8 @@ standard asterisk, so the user can see it before they try. One convention, no ha
   (CaseAlertSettings' RouteForm, CellPicker's new-tag form). The MUI fields marked so far sit in no `<form>`, so their
   `required` triggers no browser validation. Either way the page's own checks and the backend stay the authority.
 - Tests: `getByRole(..., { name })` ignores the aria-hidden asterisk, so names are unchanged; assert `toBeRequired()` (or
-  `aria-required="true"` on an editor) and, for a caption, `.MuiFormLabel-asterisk`. e2e page objects match labels with
-  `/^X\s*\*?$/`.
+  `aria-required="true"` on an editor) and, for a caption, `.MuiFormLabel-asterisk`, and their absence in the states
+  where the field is not marked. e2e page objects match labels with `/^X\s*\*?$/`.
 
 ## Runtime feature flags: `CSM_MIGRATION_*`
 

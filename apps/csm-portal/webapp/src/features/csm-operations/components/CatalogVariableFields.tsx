@@ -81,8 +81,10 @@ export default function CatalogVariableFields({
         {variables.map((v) => {
           const value = values[v.id] ?? "";
           const label = variableLabel(v);
-          const required = isVariableRequired(v);
           const readOnly = v.readOnly === true;
+          // The asterisk and aria-required, never on a read-only (disabled)
+          // control: the user can't fill it in.
+          const required = isVariableRequired(v) && !readOnly;
           // Checked client-side only when there's something to check and a
           // rule to check it against — matches
           // `getFirstFieldFailingValidation`'s own skip-when-empty rule so

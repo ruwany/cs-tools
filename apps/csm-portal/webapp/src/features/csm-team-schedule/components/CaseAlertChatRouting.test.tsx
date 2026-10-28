@@ -373,6 +373,18 @@ describe("Chat space for each team: changes wait for Submit", () => {
     expect(pending()).toHaveTextContent("No changes to submit.");
   });
 
+  it("does not mark the webhook URL once URLs can't be saved on this server, which disables the box", () => {
+    const { rerender } = render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
+    openAdd();
+    // The server stops taking URLs while the dialog is open.
+    settings.data = make({ webhooksEnabled: false });
+    rerender(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
+    const url = within(screen.getByRole("dialog", { name: "Add a team's chat space" })).getByLabelText(WEBHOOK);
+    expect(url).toBeDisabled();
+    expect(url).not.toBeRequired();
+    expect(url.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toBeNull();
+  });
+
   it("adds a team: nothing is saved until Submit, then the room and its URL", async () => {
     saveRoom.mutateAsync.mockResolvedValue({ ...apollo, id: "new-room" });
     setWebhook.mutateAsync.mockResolvedValue({});

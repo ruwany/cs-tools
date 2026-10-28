@@ -498,6 +498,38 @@ describe("AnnouncementRequestDialog — required fields", () => {
     expect(screen.getByRole("button", { name: /retry failed projects/i })).toBeEnabled();
   });
 
+  it("does not mark Subject and Description while they are locked for a retry, since they can't be edited", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
+    mockedPublish.mockReturnValue({
+      publishing: false,
+      progress: null,
+      succeededProjectIds: ["p-1"],
+      failedProjectIds: ["p-2"],
+      failedTagProjectIds: [],
+      published: null,
+      readyToPublish: true,
+      hydratingDeliveries: false,
+      hydrationFailed: false,
+      retryHydration: vi.fn(),
+      publishGivingUpOnFailed: vi.fn(),
+      handlePublish: vi.fn(),
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    const subject = screen.getByRole("textbox", { name: /^subject$/i });
+    expect(subject).toBeDisabled();
+    expect(subject).not.toBeRequired();
+    const caption = screen.getByRole("group", { name: "Description" }).previousElementSibling;
+    expect(caption).toHaveTextContent("Description");
+    expect(caption!.querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Description" })).getByLabelText("Description")).not.toHaveAttribute(
+      "aria-required",
+    );
+    expect(screen.queryByText("Required to publish.")).not.toBeInTheDocument();
+    // What it says instead.
+    expect(screen.getByText(/locked while retrying failed projects/i)).toBeInTheDocument();
+  });
+
   it("does not show the edit fields' markers on a read-only (pending approval) request", () => {
     mockGet({ state: "pending_approval" });
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);

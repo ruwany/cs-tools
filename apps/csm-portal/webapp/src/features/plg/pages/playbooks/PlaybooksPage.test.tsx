@@ -142,10 +142,10 @@ describe("PlaybooksPage: a new playbook's tasks", () => {
     choose("Runs at stage", "Registration");
     choose("Holds", "Choose any");
 
-    // Unnamed, the task is dropped, so its blank reasons hold nothing back.
+    // Unnamed, the task is dropped, so its blank reasons hold nothing back and are not marked.
     const reasons = () => [1, 2].map((n) => screen.getByRole("textbox", { name: `Reason ${n}` }));
     for (const r of reasons()) {
-      expect(r).toBeRequired();
+      expect(r).not.toBeRequired();
       expect(r).not.toHaveAttribute("aria-invalid", "true");
     }
     const createButton = screen.getByRole("button", { name: "Create playbook" });
@@ -153,7 +153,10 @@ describe("PlaybooksPage: a new playbook's tasks", () => {
 
     fireEvent.change(screen.getByRole("textbox", { name: "Task 2" }), { target: { value: "Why they left" } });
     expect(createButton).toBeDisabled();
-    for (const r of reasons()) expect(r).toHaveAttribute("aria-invalid", "true");
+    for (const r of reasons()) {
+      expect(r).toBeRequired();
+      expect(r).toHaveAttribute("aria-invalid", "true");
+    }
     expect(screen.getAllByText("A reason needs a label")).toHaveLength(2);
 
     fireEvent.change(reasons()[0], { target: { value: "Price" } });

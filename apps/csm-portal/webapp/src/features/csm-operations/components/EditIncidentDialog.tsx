@@ -261,8 +261,10 @@ export default function EditIncidentDialog({
   // incident that already has a subcategory: PATCH has no way to clear a
   // subcategory (omitted/null both mean "unchanged"), so a new category with
   // a blank subcategory would leave the old category's subcategory on the
-  // record.
-  const isSubcategoryRequiredForNewCategory = state.category !== initial.category && !!initial.subcategory;
+  // record. Not while Category is cleared: Subcategory is disabled then ("Pick
+  // a category first"), and the blank Category is what blocks Save.
+  const isSubcategoryRequiredForNewCategory =
+    !!state.category && state.category !== initial.category && !!initial.subcategory;
   const isSubcategoryMissingForNewCategory = isSubcategoryRequiredForNewCategory && !state.subcategory;
   const isValid =
     state.subject.trim().length > 0 &&
@@ -395,7 +397,8 @@ export default function EditIncidentDialog({
                 (v) => set("state", v as BeIncidentState | ""),
                 stateOptions,
                 {
-                  required: true,
+                  // A terminal state can't be changed, so its disabled select is not marked.
+                  required: !isStateTerminal,
                   disabled: isStateTerminal,
                   helperText: isStateTerminal
                     ? `${incidentStateLabel(initial.state)} is a terminal state — it can no longer be changed.`
