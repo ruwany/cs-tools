@@ -137,11 +137,14 @@ func newChangeRequestPatchEnv(t *testing.T) *changeRequestPatchEnv {
 
 	sys := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
+	// The test's change requests carry cpiSubject, or cpiSentinelTitle once
+	// mirrorQuiet has renamed them.
+	subjects := []string{cpiSubject, cpiSentinelTitle}
 	cleanup := func() {
 		_, _ = scoped.Exec(sys, `DELETE FROM sn_writeback_failures WHERE entity_type = 'change_request' AND entity_id IN (
-			SELECT id FROM work_item WHERE subject = $1)`, cpiSubject)
-		_, _ = scoped.Exec(sys, `DELETE FROM event_outbox WHERE entity_id IN (SELECT id FROM work_item WHERE subject = $1)`, cpiSubject)
-		_, _ = scoped.Exec(sys, `DELETE FROM work_item WHERE subject = $1`, cpiSubject)
+			SELECT id FROM work_item WHERE subject = ANY($1))`, subjects)
+		_, _ = scoped.Exec(sys, `DELETE FROM event_outbox WHERE entity_id IN (SELECT id FROM work_item WHERE subject = ANY($1))`, subjects)
+		_, _ = scoped.Exec(sys, `DELETE FROM work_item WHERE subject = ANY($1)`, subjects)
 		_, _ = pool.Exec(sys, `DELETE FROM service WHERE id = $1`, cpiServiceID)
 	}
 	cleanup()
