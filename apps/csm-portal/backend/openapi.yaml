@@ -5755,7 +5755,12 @@ paths:
             contact other than the requester): register a contact for the project first"
             (Request Approval, or a box turned on after it, on a project nobody can be asked
             on; likewise "customer review is ..." / "customer approval and customer review
-            are ...").
+            are ..."), and the deviation from the implementation plan's, each with its
+            `errorCode`: a change of `implementationDeviation` before implementation has
+            started (`change_request_deviation_not_yet`) or once the change request is
+            closed, canceled or rolled back (`change_request_deviation_final`), and Request
+            Approval while a deviation carried over by a clone is not yet folded into the
+            implementation plan and cleared (`change_request_deviation_not_incorporated`).
           content:
             application/json:
               schema:
@@ -6079,6 +6084,20 @@ paths:
                 category:
                   type: string
                   enum: [hardware, software, service, system_software, applications_software, network, telecom, documentation, other, regular_release_cloud, hotfix_release_cloud, devops, cloud_computing]
+                implementationDeviation:
+                  type: string
+                  description: >-
+                    The deviation from the implementation plan (rich text), sent
+                    by a clone of a change request that has one. A blank value
+                    (no text once its markup is removed, such as an emptied
+                    editor's "<p><br></p>", "<p>&nbsp;</p>" or markup that is
+                    only images) is not stored. The new change request has to
+                    fold it into its implementation plan and clear it before
+                    Request Approval (PATCH: 400
+                    `change_request_deviation_not_incorporated` until it is
+                    cleared). Staff only, never shown to customers. Refused with
+                    a 400 by a data source that cannot store it (a non-blank
+                    one only); never mirrored to the previous system.
                 comment:
                   type: string
                   description: >-
@@ -16458,7 +16477,14 @@ components:
             is recorded as having proposed), `change_request_not_asked`
             (403: not asked on the customer group's stage) and `change_request_forbidden`
             (403: the change request's creator, or a user who may not decide an internal
-            stage); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
+            stage); the deviation from the implementation plan's refusals on PATCH
+            /change-requests/{id}: `change_request_deviation_not_yet` (400: a change of
+            implementationDeviation before implementation has started; nothing written),
+            `change_request_deviation_final` (400: a change of it once the change request is
+            closed, canceled or rolled back; nothing written) and
+            `change_request_deviation_not_incorporated` (400: Request Approval while a
+            deviation a clone carried over is not yet folded into the implementation plan
+            and cleared; nothing written); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
             the assignmentGroupId sent is not the active support group of any service).
             Every other create-incident failure keeps the generic message and carries no
             code. The list grows, so this is deliberately not a closed enum.
@@ -16574,6 +16600,23 @@ components:
           type: string
         testPlan:
           type: string
+        implementationDeviation:
+          type: string
+          description: >-
+            The deviation from the implementation plan (rich text): what the implementation
+            or the review actually did differently from the approved plan. A blank value
+            clears it: blank is no text once the markup is removed, so "<p><br></p>",
+            "<p>&nbsp;</p>" and markup that is only images are blank too. Not under the
+            approved-content lock, but judged on the change request's stored state (before
+            this PATCH is applied): editable in implement, review and customer_review; in new
+            only clearing one a clone carried over is accepted, and in assess, authorize,
+            customer_approval and scheduled no change is (400 `change_request_deviation_not_yet`);
+            in closed, canceled and rollback none is (400 `change_request_deviation_final`).
+            Resending the stored value is always accepted. Request Approval (`state: "assess"`
+            on a new change request) is refused while one is in effect unless the same request
+            clears it (400 `change_request_deviation_not_incorporated`). A refused PATCH writes
+            nothing. Staff only, never shown to customers; refused with a 400 by a data source
+            that cannot store it, and never mirrored to the previous system.
         customerApprovalRequired:
           type: boolean
           description: >-
@@ -21866,6 +21909,18 @@ components:
             testPlan:
               type: string
               nullable: true
+            implementationDeviation:
+              type: string
+              nullable: true
+              description: >-
+                "Deviation from the implementation plan" (rich text): what the implementation
+                or the review actually did differently from the implementation plan. Written
+                after the approval: recorded in implement, review and customer_review, final
+                once the change request is closed, canceled or rolled back (see
+                PatchChangeRequestPayload.implementationDeviation). A clone copies it, and the
+                clone must fold it into its implementation plan and clear it before Request
+                Approval. Passed through from the entity service: null when none is recorded,
+                for a customer caller, and when the backing data source has no such field.
             hasCustomerApproved:
               type: boolean
               description: >-
