@@ -186,7 +186,8 @@ func cpiDeref(s *string) string {
 	return *s
 }
 
-// create makes a Normal change request in New with every clearable field set.
+// create makes a Normal change request in New with the fields the null tests
+// clear set: the plan, priority, category and the three free-text fields.
 func (e *changeRequestPatchEnv) create(t *testing.T) string {
 	t.Helper()
 	normal := domain.ChangeRequestTypeNormal

@@ -4001,9 +4001,11 @@ change-request-specific was added beyond the field on the read model:
   and the service, both create paths); `handler/change_request_patch_integration_test.go`
   (`CHANGE_REQUEST_TEST_DSN`: PATCH and both creates against PostgreSQL);
   `service/change_request_service_mirror_test.go` (the real previous-system
-  adapter as the mirror). A test that a PATCH is not mirrored sends a mirrored
-  sentinel PATCH after it and waits for that: the write-back dispatcher runs one
-  change request's writes one at a time, in dispatch order.
+  adapter as the mirror); `service/sn_change_request_service_test.go` (the
+  refusal of the data source that talks to the previous system directly). A test
+  that a PATCH is not mirrored sends a mirrored sentinel PATCH after it and waits
+  for that: the write-back dispatcher runs one change request's writes one at a
+  time, in dispatch order.
 
 ### The approval tables are the sync layer's (state, not status)
 

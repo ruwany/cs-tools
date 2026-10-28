@@ -23489,8 +23489,10 @@ components:
               nullable: true
               description: >-
                 On the PostgreSQL data source the stored value in lower case: critical,
-                high, moderate, low or planning. On the data source that talks to the previous system directly critical,
-                high, moderate or low, or the raw label of any other choice.
+                high, moderate, low or planning (planning only on rows migrated from the
+                previous system: a create or a PATCH refuses it). On the data source that
+                talks to the previous system directly critical, high, moderate or low, or the
+                raw label of any other choice.
             changeRequestType:
               type: string
               nullable: true

@@ -7718,8 +7718,12 @@ paths:
                 $ref: '#/components/schemas/PatchChangeRequestResponse'
         "400":
           description: >-
-            Bad request: a malformed or out-of-range planned window, or a refusal of the
-            customer requirements lock, each with a readable message --
+            Bad request: a malformed or out-of-range planned window, a priority this API does
+            not set (on the PostgreSQL data sources "priority must be one of critical, high,
+            moderate or low"), a field the data source cannot store, named in the message (for
+            example onHold on the data source that talks to the previous system directly, or
+            durationInput on the PostgreSQL data sources), or a refusal of the customer
+            requirements lock, each with a readable message --
             "projectId can no longer be changed: the Customer Project is fixed once
             approval has been requested (current state: X). Cancel this change request and
             clone it to use another project.";
@@ -25146,9 +25150,9 @@ components:
               description: >-
                 On the PostgreSQL data source the stored value in lower case: critical,
                 high, moderate, low or planning (planning only on rows migrated from the
-                previous system: a PATCH refuses it). On the data source that talks to the
-                previous system directly, critical, high, moderate or low, or the raw
-                label of any other choice.
+                previous system: a create or a PATCH refuses it). On the data source that
+                talks to the previous system directly, critical, high, moderate or low, or
+                the raw label of any other choice.
             category:
               type: string
               nullable: true
