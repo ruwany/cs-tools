@@ -5173,8 +5173,8 @@ type PatchChangeRequestRequest struct {
 	// ImplementationDeviation sets the "Deviation from the implementation plan"
 	// (see ChangeRequest.ImplementationDeviation). nil leaves it unchanged; a
 	// blank value -- no text once its markup is removed, so "<p><br></p>" too --
-	// clears it (a plain *string, not the pointer-to-pointer below:
-	// encoding/json decodes an explicit null as omitted). It is not one of the
+	// clears it (a plain *string: an explicit null is read as omitted, unlike
+	// the pointer-to-pointer fields below). It is not one of the
 	// approved lock's fields: it is recorded in implement, review and
 	// customer_review. Before implementation a change is a 400
 	// change_request_deviation_not_yet (in new, clearing one a clone carried over
@@ -5195,25 +5195,33 @@ type PatchChangeRequestRequest struct {
 	//   - nil outer pointer: field omitted -- leave the value unchanged
 	//   - non-nil outer, nil inner: explicit null -- clear the value
 	//   - non-nil outer, non-nil inner: set the value
+	// On the wire an explicit null reaches the struct as the second state
+	// through PatchChangeRequestRequest.UnmarshalJSON
+	// (change_request_patch_json.go): encoding/json alone reads a null as an
+	// omitted field. The tags carry omitempty so a marshalled request (the
+	// write-back failure record) reads back the same way.
 	// DeploymentProductIDs uses a single pointer instead: nil
-	// means omitted, and any non-nil slice (including an explicitly empty one)
-	// replaces the whole list -- the same convention CreateIncidentRequest's
-	// WatchList already uses, since an array field has no separate "null" state
-	// worth distinguishing from "empty".
-	ImplementationPlan     **string                `json:"implementationPlan"`
-	Priority               **ChangeRequestPriority `json:"priority"`
-	Category               **ChangeRequestCategory `json:"category"`
-	RequestedByID          **string                `json:"requestedById"`
-	AffectedServicesText   **string                `json:"affectedServicesText"`
-	AffectedComponentsText **string                `json:"affectedComponentsText"`
+	// means omitted (a null too), and any non-nil slice (including an explicitly
+	// empty one) replaces the whole list -- the same convention
+	// CreateIncidentRequest's WatchList already uses, since an array field has
+	// no separate "null" state worth distinguishing from "empty".
+	ImplementationPlan **string `json:"implementationPlan,omitempty"`
+	// Priority is critical, high, moderate or low. Anything else is a 400,
+	// planning included: rows migrated from the previous system can read back
+	// "planning" (its priority 5), but it is not a value this API sets.
+	Priority               **ChangeRequestPriority `json:"priority,omitempty"`
+	Category               **ChangeRequestCategory `json:"category,omitempty"`
+	RequestedByID          **string                `json:"requestedById,omitempty"`
+	AffectedServicesText   **string                `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText **string                `json:"affectedComponentsText,omitempty"`
 	// RollbackDurationText is a raw, unvalidated string (e.g. "2 hours");
 	// parsing or normalizing it is a decision for the layer above, not this one.
-	RollbackDurationText **string  `json:"rollbackDurationText"`
-	DeploymentProductIDs *[]string `json:"deploymentProductIds"`
+	RollbackDurationText **string  `json:"rollbackDurationText,omitempty"`
+	DeploymentProductIDs *[]string `json:"deploymentProductIds,omitempty"`
 	// CustomerGroupID and EnvironmentIDs are NO LONGER ACCEPTED (any value,
 	// null included, is a 400); see CreateChangeRequestRequest.
-	CustomerGroupID **string  `json:"customerGroupId"`
-	EnvironmentIDs  *[]string `json:"environmentIds"`
+	CustomerGroupID **string  `json:"customerGroupId,omitempty"`
+	EnvironmentIDs  *[]string `json:"environmentIds,omitempty"`
 	// DeploymentIDs replaces the whole list of the project's deployments the
 	// change touches (an explicitly empty array clears it, and with it the
 	// deployment products that follow from it). Together
@@ -5225,7 +5233,7 @@ type PatchChangeRequestRequest struct {
 	// Changing ProjectID while deployments are stored requires DeploymentIDs
 	// in the same request. Cannot be combined with the single DeploymentID /
 	// DeployedProductID fields. PostgreSQL data source only.
-	DeploymentIDs *[]string `json:"deploymentIds"`
+	DeploymentIDs *[]string `json:"deploymentIds,omitempty"`
 	// Comment and WorkNote append a new journal entry (the customer-visible
 	// "Additional comments" and the internal "Work notes"); they reject an
 	// empty or whitespace-only value, and neither can be used to clear anything.
@@ -5235,7 +5243,7 @@ type PatchChangeRequestRequest struct {
 	// only when it exactly matches the effective planned window: PlannedStartOn
 	// if provided in this same request, else the change request's stored start,
 	// and likewise for the end. See CreateChangeRequestRequest.DurationInput.
-	DurationInput **int `json:"durationInput"`
+	DurationInput **int `json:"durationInput,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
