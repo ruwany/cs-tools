@@ -6233,8 +6233,8 @@ the previous system directly refuses `confirmCustomerUpdatedDate` / `expectedCus
 proposed date is answered in that system) and forwards proposals and Re-schedules as ever. Notices (`CR_NOTICES_ENABLED`, off by
 default): the existing `planDateNotice` turns apply unchanged and no notice kind or table was added -- a proposal tells
 the "Devops Approval" team (a team nobody belongs to in this database has no recipient: the banner and the Awaiting chip are
-the signal). That notice's actor -- the name it carries, and the WSO2 test that suppresses it
-(`sys_updated_byNOT LIKE@wso2.com`) -- is **the contact the proposal recorded**, read from the proposal's own outbox row:
+the signal). That notice's actor -- the name it carries, and the test that suppresses it for a wso2.com address -- is
+**the contact the proposal recorded**, read from the proposal's own outbox row:
 when its snapshot carries a non-empty `customer_proposed_by_user_id` whose `customer_proposed_for` is `customer_updated_on`
 itself (compared as instants), `crPlanDateActor` names that user with `CRNoticeRepository.UserActor`, by the rule `Details` names
 a last writer by (last name first; WSO2 when their email, else user name, is a wso2.com address). What it reads there is the

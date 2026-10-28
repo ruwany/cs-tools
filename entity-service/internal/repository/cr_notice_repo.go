@@ -228,7 +228,8 @@ const crNoticeActorNameSQL = `COALESCE(
 		       )`
 
 // crNoticeWSO2AddressSQL completes "lower(<the actor's address>)" into the test
-// of a WSO2 actor: the original trigger's sys_updated_byNOT LIKE@wso2.com.
+// of a WSO2 actor: an address at wso2.com, the test the previous system's trigger
+// applied to the last writer.
 const crNoticeWSO2AddressSQL = ` LIKE '%@wso2.com'`
 
 // UserActor names the user userID the way Details names the last writer
