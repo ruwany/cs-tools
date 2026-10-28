@@ -313,6 +313,9 @@ export default function BulkEditChangeRequestsDialog({
   /** "N of the selected change requests have no X": why a field is required to request approval. */
   const lackingHelper = (n: number, what: string): string =>
     `Required to request approval: ${n} of the selected change requests ${n === 1 ? "has" : "have"} ${what}, and without one ${n === 1 ? "it is" : "they are"} skipped.`;
+  /** The same count, said plainly where the field can't be set here. */
+  const lackingNote = (n: number, what: string): string =>
+    `${n} of the selected change requests ${n === 1 ? "has" : "have"} ${what}, so ${n === 1 ? "it is" : "they are"} skipped.`;
 
   const startDate = parseDateTimeLocal(plannedStart);
   const endDate = parseDateTimeLocal(plannedEnd);
@@ -759,7 +762,7 @@ export default function BulkEditChangeRequestsDialog({
               />
               {lackingProjectCount > 0 && !projectRequired && (
                 <Typography variant="caption" color="text.secondary">
-                  {`${lackingProjectCount} of the selected change requests ${lackingProjectCount === 1 ? "has" : "have"} a customer step ticked and no Customer Project, so ${lackingProjectCount === 1 ? "it is" : "they are"} skipped.`}
+                  {lackingNote(lackingProjectCount, "a customer step ticked and no Customer Project")}
                 </Typography>
               )}
               {sendScope && (
