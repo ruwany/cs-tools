@@ -35,7 +35,7 @@ cd apps/customer-portal/webapp && node_modules/.bin/playwright test --list tests
 cd apps/csm-portal/webapp && node_modules/.bin/vitest list src/features/csm-operations src/features/help
 ```
 
-Run the integration tests twice, as the superuser and as `csm_app`: five tests of the repository package (two migration-idempotence tests and three seed tests) need table ownership or bypass RLS and fail as `csm_app`; that is expected and they pass as the superuser. The re-run tests of migrations 0249 and 0250 (`..._ProposerMigrationIsSafeToRunAgain`, `..._KeepLegacyProposerMigrationIsSafeToRunAgain`) are skipped as `csm_app`: they need the owner of the table.
+Run the integration tests twice, as the superuser and as `csm_app`, on a database that carries the row-level policies of the `1NNNNN` migrations (`scripts/csm-compose/migrate-and-seed.sh` does not apply those; `make migrate` does). Nine tests of the repository package fail as `csm_app` and pass as the superuser: two migration-idempotence tests and three seed tests, which need table ownership or bypass the row-level policies, and four of the Review checkpoint tests (`TestChangeRequestIntegration_PatchReviewProvisionsApproversFromGroupMembers`, `..._PatchReviewDoesNotReprovisionWhenStageExists`, `..._PatchReviewDeduplicatesGroupMembers`, `..._PatchReviewProvisionsRequesterAsCancelled`). The re-run tests of migrations 0249 and 0250 (`..._ProposerMigrationIsSafeToRunAgain`, `..._KeepLegacyProposerMigrationIsSafeToRunAgain`) are skipped as `csm_app`: they need the owner of the table.
 
 ## 3. Scenario map
 
