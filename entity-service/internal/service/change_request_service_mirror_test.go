@@ -144,6 +144,10 @@ func TestChangeRequestService_PatchChangeRequest_PostgresOnlyFieldsAreNotMirrore
 				t.Errorf("mirrored body carries %q: %v", k, got[0])
 			}
 		}
+		// The PATCH under test signalled before its write returned, so its failure
+		// (if any) may not be recorded yet. A second sentinel, run after it in
+		// dispatch order, makes sure it is.
+		awaitMirroredWrites(ctx, t, svc, server.sentinel)
 		if n := failures.count(); n != 0 {
 			t.Errorf("write-back failures = %d, want 0", n)
 		}
