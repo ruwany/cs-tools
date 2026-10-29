@@ -250,10 +250,9 @@ func TestIsBlankRichText_EmptyEditorMarkup(t *testing.T) {
 // IsBlankRichText runs under a change request's row locks on input up to the 1
 // MiB request body cap, and nothing can stop it once it runs, so it must take
 // time linear in its input. These shapes are the ones that make a parser
-// quadratic when a lookup walks what is open (an earlier scanner took 22 s on
-// the comments and 7 s on the dropped elements); linear, each takes milliseconds
-// (the slowest, paragraphs of bold text, about 110 ms). The limit leaves room for
-// a slow or race-instrumented build.
+// quadratic when a lookup walks what is open; parsed in linear time, each
+// finishes far inside the limit, which leaves room for a slow or
+// race-instrumented build.
 func TestIsBlankRichText_LinearTime(t *testing.T) {
 	const size = 1 << 20
 	repeat := func(unit string, n int) string { return strings.Repeat(unit, n/len(unit)) }
