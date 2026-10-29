@@ -188,7 +188,7 @@ describe("buildCloneChangeRequestNavState", () => {
     expect(keys).not.toContain("serviceOutage");
     expect(keys).not.toContain("communicationPlan");
     expect(keys).not.toContain("rollbackPlan");
-    // priority/risk have no clone source.
+    // priority is not carried; risk has no clone source.
     expect(keys).not.toContain("priority");
     expect(keys).not.toContain("risk");
   });

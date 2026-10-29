@@ -1746,9 +1746,9 @@ export function buildChangeRequestSearchFilters(
 // and several fields the detail page can show have no create-time
 // equivalent at all. Concretely (verified against the entity service's own
 // request/response structs, not just the two frontend types):
-//   - `priority` is write-only — accepted by create, never present on the
-//     read response — so there is no source value to copy from, ever,
-//     regardless of how the form is wired.
+//   - `priority` is not carried: the read returns it
+//     (BeChangeRequestDetail.priority), but a clone leaves it for the user to
+//     set, and a migrated change request's planning is not a value create takes.
 //   - The create form's "Risk and impact analysis" (`riskImpactAnalysis`) and
 //     "Backout plan" (`backoutPlan`) come back on the read as
 //     `impactDescription` and `rollbackPlan` (the entity service writes both
@@ -1865,7 +1865,7 @@ export function buildCloneChangeRequestNavState(
 export const CLONE_SOURCE_GAP_MESSAGE =
   "Copied the subject, description, justification, implementation plan and any deviation from it, risk and impact analysis, backout plan, test plan, type, impact, assigned engineer, customer project, category, and customer approval/review settings. " +
   "Priority, assignment group, " +
-  "linked case, and affected product aren't available to copy and need to be re-entered. " +
+  "linked case, and affected product aren't copied and need to be re-entered. " +
   "Deployments, deployment products, schedule, and approval fields are intentionally left blank for you to set for the new environment. The Customer Group follows the customer project.";
 
 // ---------------------------------------------------------------------------
