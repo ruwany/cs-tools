@@ -7477,9 +7477,11 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: >-
-            "change request not found": the row-level policy on change_request refused the
-            insert (only an internal caller may insert one). The route admits internal callers
-            only, so a caller that passes it does not get this.
+            "change request not found": on the PostgreSQL data sources, the row-level policy on
+            change_request refused the insert (only an internal caller may insert one, and the
+            route admits internal callers only). On the data source that talks to the previous
+            system directly, that system's 404 is passed through: it does not know a record the
+            request refers to.
           content:
             application/json:
               schema:
@@ -7488,7 +7490,8 @@ paths:
           description: >-
             On the create that writes the previous system first: that system refused the create
             as a conflict, or answered with an id or number a change request in PostgreSQL
-            already has. Nothing was written to PostgreSQL.
+            already has. Nothing was written to PostgreSQL. On the data source that talks to the
+            previous system directly, that system's 409 is passed through.
           content:
             application/json:
               schema:
@@ -7502,8 +7505,10 @@ paths:
         "503":
           description: >-
             The caller's identity could not be resolved to a scope (for example no verified
-            identity on the request), or, on the create that writes the previous system first,
-            that system is unavailable (nothing was written to PostgreSQL).
+            identity on the request); on the create that writes the previous system first, that
+            system is unavailable (nothing was written to PostgreSQL); or, on the data source that
+            talks to the previous system directly, that system is unavailable or could not be
+            reached.
           content:
             application/json:
               schema:

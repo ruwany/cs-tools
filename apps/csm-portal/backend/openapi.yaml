@@ -5952,8 +5952,9 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "503":
           description: >-
-            Service unavailable: the entity service answered 503 (on the data source that talks
-            to the previous system directly, that system is unavailable).
+            Service unavailable: the entity service, or a gateway in front of it, answered 502,
+            503 or 504 (on the data source that talks to the previous system directly, for
+            example, that system is unavailable).
           content:
             application/json:
               schema:
@@ -6406,9 +6407,10 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: >-
-            The entity service's 404, passed through with a fixed message. It answers a create
-            with one only when its row-level policy refuses the insert, which an internal caller
-            such as this backend does not meet.
+            The entity service's 404, passed through with a fixed message: on the PostgreSQL data
+            sources only when its row-level policy refuses the insert, which an internal caller
+            such as this backend does not meet; on the data source that talks to the previous
+            system directly, when that system does not know a record the request refers to.
           content:
             application/json:
               schema:
@@ -6417,7 +6419,8 @@ paths:
           description: >-
             The entity service's 409, its reason echoed: on the data source that writes the
             previous system first, that system refused the create as a conflict or answered with
-            an id or number a change request already has. Nothing was written to PostgreSQL.
+            an id or number a change request already has (nothing was written to PostgreSQL),
+            or, on the data source that talks to the previous system directly, that system's 409.
           content:
             application/json:
               schema:
@@ -6436,8 +6439,8 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "503":
           description: >-
-            Service unavailable: the entity service answered 503 (for example, the previous
-            system it calls first is unavailable).
+            Service unavailable: the entity service, or a gateway in front of it, answered 502,
+            503 or 504 (for example, the previous system it calls is unavailable).
           content:
             application/json:
               schema:
