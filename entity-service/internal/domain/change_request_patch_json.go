@@ -27,9 +27,11 @@ import (
 // explicit null is a value of its own, and what setting each to "null" means
 // on the struct: a non-nil outer pointer that holds nil.
 //
-// On the pointer-to-pointer fields that is "clear", except customerGroupId,
-// which is listed (with environmentIds) so that its null is refused like any
-// other value of a field that is no longer accepted. deploymentIds and
+// On the pointer-to-pointer fields that is "clear" (for durationInput only on
+// the data source that talks to the previous system directly; the PostgreSQL
+// data sources refuse any durationInput), except customerGroupId, which is
+// listed (with environmentIds) so that its null is refused like any other
+// value of a field that is no longer accepted. deploymentIds and
 // deploymentProductIds are NOT listed: their null stays "omitted" (an empty
 // array is how a list is cleared), as on every other plain pointer field.
 var changeRequestPatchNullable = []struct {

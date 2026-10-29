@@ -5054,9 +5054,12 @@ type SearchAccountContactsResponse struct {
 
 // PatchChangeRequestRequest is the request body for PATCH /change-requests/{id}.
 // All fields are optional, but at least one must be provided. An explicit null
-// clears the pointer-to-pointer fields of the field-parity block below, except
-// CustomerGroupID, and counts as a field; CustomerGroupID and EnvironmentIDs
-// refuse it; on every other field it is read as omitted.
+// clears ImplementationPlan, Priority, Category, RequestedByID,
+// AffectedServicesText, AffectedComponentsText and RollbackDurationText and
+// counts as a field. A null DurationInput is forwarded by the data source that
+// talks to the previous system directly and refused, like any DurationInput, by
+// the PostgreSQL data sources. CustomerGroupID and EnvironmentIDs refuse a null;
+// on every other field a null is read as omitted.
 type PatchChangeRequestRequest struct {
 	Title              *string              `json:"title,omitempty"`
 	Description        *string              `json:"description,omitempty"`
@@ -5212,8 +5215,11 @@ type PatchChangeRequestRequest struct {
 	// (change_request_patch_json.go), and counts as a field: encoding/json alone
 	// reads a null as an omitted field. CustomerGroupID's null is refused like
 	// any other value, and so is EnvironmentIDs' (UnmarshalJSON keeps it as a
-	// non-nil pointer to a nil slice). The tags carry omitempty so a marshalled
-	// request (the write-back failure record) reads back the same way.
+	// non-nil pointer to a nil slice). DurationInput's null clears only on the
+	// data source that talks to the previous system directly; the PostgreSQL data
+	// sources refuse any DurationInput (see its comment). The tags carry
+	// omitempty so a marshalled request (the write-back failure record) reads
+	// back the same way.
 	// DeploymentProductIDs, EnvironmentIDs and DeploymentIDs use a single
 	// pointer instead: nil means omitted (for the first and the last a null
 	// too), and any non-nil slice (including an explicitly empty one) replaces
