@@ -22,6 +22,9 @@
 --   customer_proposed_for         the proposed start the record is about
 --   customer_proposed_on          when it was proposed
 --
+-- customer_proposed_for keeps this name (no _on suffix): it is the proposed start the record is
+-- about, compared with customer_updated_on, not the time of an event.
+--
 -- Until now the proposer was read from work_item.updated_by, the change's last writer, so any
 -- staff save after a customer's proposal (a work note, a comment, the hold) made the proposal
 -- read "nobody is recorded" and Accept was refused. The record survives those writes. It names a
