@@ -56,6 +56,7 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     knownLabel,
     disableClearable,
     disabled,
+    accountId,
     onChange,
   }: {
     label: string;
@@ -63,12 +64,15 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     knownLabel?: string;
     disableClearable?: boolean;
     disabled?: boolean;
+    accountId?: string;
     onChange: (next: string, name?: string) => void;
   }) => (
     <input
       aria-label={label}
       data-known-label={knownLabel ?? ""}
       data-disable-clearable={String(!!disableClearable)}
+      // The customer the real picker narrows its search to (server-side).
+      data-account-id={accountId ?? ""}
       disabled={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value, PROJECT_NAMES[e.target.value])}
@@ -1612,12 +1616,34 @@ describe("EditChangeRequestDialog — a change raised from a standard change tem
     standardChange: {
       template: { id: "tpl-1", name: "Rotate a TLS certificate" },
       templateNumber: "STD0000001",
+      customer: { id: "acct-1", name: "Acme Corp" },
       versionId: "ver-2",
       version: 2,
       parameters: [{ key: "host", label: "Host", type: "text", required: true, value: "gw-1" }],
     },
   };
   const HINT = "Set by the standard change template.";
+
+  it("offers only the template's customer's projects while the project can still be changed (New)", () => {
+    renderDialog(TEMPLATED);
+    const project = screen.getByLabelText("Customer Project");
+    expect(project).toBeEnabled();
+    expect(project).toHaveAttribute("data-account-id", "acct-1");
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      /its customer is acme corp: only acme corp's projects are offered as the customer project/i,
+    );
+  });
+
+  it("says nothing about the customer's projects once the project is fixed (after New)", () => {
+    renderDialog({ ...TEMPLATED, state: "scheduled", legalNextStates: [] });
+    expect(screen.getByLabelText("Customer Project")).toBeDisabled();
+    expect(screen.queryByText(/only acme corp's projects are offered/i)).not.toBeInTheDocument();
+  });
+
+  it("does not narrow the project of a change not raised from a template", () => {
+    renderDialog({ ...TEMPLATED, standardChange: null });
+    expect(screen.getByLabelText("Customer Project")).toHaveAttribute("data-account-id", "");
+  });
 
   it("says which template the change follows and why its fields are read-only", () => {
     renderDialog(TEMPLATED);
