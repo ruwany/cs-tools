@@ -96,7 +96,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
 
   const { data: article, isLoading, isError, error } = useGetKBArticle(id);
   const { data: history } = useGetKBArticleHistory(id);
-  const { data: kbList, isLoading: kbListLoading, isError: kbListFailed } = useListKnowledgeBases();
+  const { data: kbList, isSuccess: kbListLoaded, isError: kbListFailed } = useListKnowledgeBases();
   const { data: teams } = useSearchTeams();
   const createArticle = useCreateKBArticle();
   const patchContent = usePatchKBArticleContent(id);
@@ -130,7 +130,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
 
   // Marked required only once there is one to pick; with none (or the list
   // failed), the select is disabled and says why, and Save draft waits.
-  const kbPickable = !kbListLoading && activeKnowledgeBases.length > 0;
+  const kbPickable = activeKnowledgeBases.length > 0;
 
   const [kbDefaulted, setKbDefaulted] = useState(false);
   if (isCreateMode && !kbDefaulted && activeKnowledgeBases.length) {
@@ -412,7 +412,8 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
-              {!kbListLoading && !kbPickable && (
+              {/* isSuccess, not !isLoading: a query paused offline is neither loading nor failed. */}
+              {!kbPickable && (kbListLoaded || kbListFailed) && (
                 <FormHelperText>
                   {kbListFailed
                     ? "Couldn't load the knowledge bases, so the article can't be saved yet. Try again later."

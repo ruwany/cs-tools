@@ -26,7 +26,7 @@ const patchStateMutate = vi.fn();
 let article: KBArticle | undefined;
 const PRODUCT_KB = { id: "kb-1", title: "Product KB", active: true, createdOn: "", updatedOn: "" };
 // The knowledge base list as the hook returns it; one active knowledge base unless a test says otherwise.
-let kbList: { data: unknown; isLoading: boolean; isError: boolean };
+let kbList: { data: unknown; isSuccess: boolean; isError: boolean };
 
 const mutation = (mutate: ReturnType<typeof vi.fn>) => ({ mutate, isPending: false, error: null });
 
@@ -130,7 +130,7 @@ describe("CsmKBArticleEditorPage — required fields", () => {
     patchContentMutate.mockReset();
     patchStateMutate.mockReset();
     article = undefined;
-    kbList = { data: { knowledgeBases: [PRODUCT_KB] }, isLoading: false, isError: false };
+    kbList = { data: { knowledgeBases: [PRODUCT_KB] }, isSuccess: true, isError: false };
   });
 
   it("marks Knowledge base, Title and Body required when creating", () => {
@@ -143,7 +143,7 @@ describe("CsmKBArticleEditorPage — required fields", () => {
   });
 
   it("does not mark the knowledge base when there is none to pick, says why, and holds Save draft back", () => {
-    kbList = { data: { knowledgeBases: [{ ...PRODUCT_KB, active: false }] }, isLoading: false, isError: false };
+    kbList = { data: { knowledgeBases: [{ ...PRODUCT_KB, active: false }] }, isSuccess: true, isError: false };
     renderAt("/knowledge/my-articles/new");
 
     expect(screen.getByRole("combobox", { name: "Knowledge base" })).toHaveAttribute("aria-disabled", "true");
@@ -153,13 +153,24 @@ describe("CsmKBArticleEditorPage — required fields", () => {
   });
 
   it("says so when the knowledge bases couldn't be loaded, without marking the empty select", () => {
-    kbList = { data: undefined, isLoading: false, isError: true };
+    kbList = { data: undefined, isSuccess: false, isError: true };
     renderAt("/knowledge/my-articles/new");
 
     expect(document.querySelector("#kb-select-label .MuiFormLabel-asterisk")).toBeNull();
     expect(
       screen.getByText("Couldn't load the knowledge bases, so the article can't be saved yet. Try again later."),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+  });
+
+  it("says nothing about the knowledge bases while their list has not arrived (a query paused offline)", () => {
+    // Paused: neither loading nor failed, and no data yet.
+    kbList = { data: undefined, isSuccess: false, isError: false };
+    renderAt("/knowledge/my-articles/new");
+
+    expect(screen.queryByText(/No knowledge base is taking new articles/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't load the knowledge bases/)).not.toBeInTheDocument();
+    expect(document.querySelector("#kb-select-label .MuiFormLabel-asterisk")).toBeNull();
     expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
   });
 
