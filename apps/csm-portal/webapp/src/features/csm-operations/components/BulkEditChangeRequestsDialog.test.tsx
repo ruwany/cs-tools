@@ -458,8 +458,10 @@ describe("BulkEditChangeRequestsDialog — what Request Approval needs", () => {
   }, 20_000);
 
   it("does not mark the Customer Project where it can't be set here, and says plainly who is skipped", async () => {
-    // A mixed selection: one New with a customer step and no project, one past New in another project (its moves
-    // still include Request Approval). The project is set only when all are New, so the picker is disabled.
+    // A mixed selection: one New with a customer step and no project, one past New in another project. Past New the
+    // backend offers no Request Approval, so this fixture (legalNextStates with "assess") stands in for a selection
+    // whose details changed after Request Approval was picked. The project is set only when all are New, so the
+    // picker is disabled.
     const dialog = renderDialog([
       cr("a", { assignedTeam: TEAM, customerApprovalRequired: true }),
       cr("b", {
