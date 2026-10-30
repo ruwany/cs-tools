@@ -7647,7 +7647,7 @@ paths:
 
         A proposed window, from a registered contact the customer's approval has been
         asked of (the same test as customerCanAnswer: a REQUESTED approval on the live
-        Customer Approval stage) while the change request is in customer_approval, is the
+        Customer Approval stage) while the change request is in customer_approval, is
         a PROPOSAL: it writes the proposed START to customer_updated_on and, in the same write, the
         record of who proposed it (customer_proposed_by_user_id / customer_proposed_for /
         customer_proposed_on, migration 0249), and nothing else (the
