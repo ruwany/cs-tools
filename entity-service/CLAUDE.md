@@ -11112,6 +11112,11 @@ read as `parentIncident`, written as `parentIncidentId`). It is **not** `work_it
 - **After commit** (`afterChildIncidentsResolved`, best-effort): `state`/`resolution_code`
   activity rows per child, as the parent's actor, and `incident.acknowledged` for a child that
   left NEW. No ServiceNow mirror per child: in dual-write ServiceNow's own rule resolves its side.
+  Accepted gap: the link and the resolve are mirrored on different dispatcher keys (the child's,
+  the parent's), so a child linked moments before its parent is resolved can reach ServiceNow after
+  the parent's resolve, and ServiceNow then leaves it open. Postgres follows the order its own
+  commits landed in (a child linked before the resolve committed is resolved with it); only
+  ServiceNow's copy can differ.
 - **`resolved_with_parent`** (0256) is set by the cascade and cleared when an incident is resolved
   by its own update (a re-open leaves it as it was, like `resolved_on`). `IncidentView`
   exposes it as `resolvedWithParent`. The incident report drainer still writes a child's report but
