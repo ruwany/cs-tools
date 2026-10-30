@@ -364,6 +364,10 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 	if err := validateUUIDs("parentIds", req.Filters.ParentIDs); err != nil {
 		return domain.SearchIncidentsResponse{}, err
 	}
+	if len(req.Filters.ParentIncidentIDs) > 0 {
+		// The ServiceNow integration has no parent_incident filter to map it onto.
+		return domain.SearchIncidentsResponse{}, &apierror.ValidationError{Msg: "filters.parentIncidentIds is not supported by this data source"}
+	}
 	parsedFilters, err := ParseIncidentFieldFilters(req.Filters.Filters, time.Now().UTC())
 	if err != nil {
 		return domain.SearchIncidentsResponse{}, err
@@ -526,6 +530,10 @@ func (s *snIncidentService) AggregateIncidents(ctx context.Context, req domain.A
 	}
 	if err := validateUUIDs("parentIds", req.Filters.ParentIDs); err != nil {
 		return domain.AggregateResponse{}, err
+	}
+	if len(req.Filters.ParentIncidentIDs) > 0 {
+		// The ServiceNow integration has no parent_incident filter to map it onto.
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "filters.parentIncidentIds is not supported by this data source"}
 	}
 	parsedFilters, err := ParseIncidentFieldFilters(req.Filters.Filters, time.Now().UTC())
 	if err != nil {

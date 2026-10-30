@@ -94,8 +94,11 @@ type stubIncidentRepo struct {
 	createIncidentComment   func(ctx context.Context, incidentID string, commentType domain.CommentType, content, createdBy string) (domain.CaseComment, error)
 	getIncidentByID         func(ctx context.Context, id string) (domain.IncidentView, error)
 	updateIncidentLifecycle func(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) error
-	applySpecialistHandoff  func(ctx context.Context, id, actorEmail string, plan func(repository.SpecialistHandoffSnapshot) (repository.SpecialistHandoffPlan, error)) (repository.SpecialistHandoffWritten, error)
-	searchActivities        func(ctx context.Context, req domain.SearchIncidentActivitiesRequest) ([]domain.CaseActivity, int, error)
+	// resolvedChildren is what UpdateIncidentLifecycle reports its cascade resolved, after a
+	// successful updateIncidentLifecycle.
+	resolvedChildren       []repository.ResolvedChildIncident
+	applySpecialistHandoff func(ctx context.Context, id, actorEmail string, plan func(repository.SpecialistHandoffSnapshot) (repository.SpecialistHandoffPlan, error)) (repository.SpecialistHandoffWritten, error)
+	searchActivities       func(ctx context.Context, req domain.SearchIncidentActivitiesRequest) ([]domain.CaseActivity, int, error)
 	// recordedChanges collects every RecordIncidentFieldChanges call; recordChangesErr fails them.
 	// Unlike the other hooks it is not a panic when unset: the activity write rides on every update.
 	recordedChanges  []recordedIncidentChanges
@@ -204,9 +207,12 @@ func (s *stubIncidentRepo) CreateIncident(ctx context.Context, req domain.Create
 	}
 	panic("CreateIncident called unexpectedly")
 }
-func (s *stubIncidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) error {
+func (s *stubIncidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) ([]repository.ResolvedChildIncident, error) {
 	if s.updateIncidentLifecycle != nil {
-		return s.updateIncidentLifecycle(ctx, id, u, actorEmail)
+		if err := s.updateIncidentLifecycle(ctx, id, u, actorEmail); err != nil {
+			return nil, err
+		}
+		return s.resolvedChildren, nil
 	}
 	panic("UpdateIncidentLifecycle called unexpectedly")
 }

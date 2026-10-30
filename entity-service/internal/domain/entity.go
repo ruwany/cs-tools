@@ -6557,6 +6557,11 @@ type SearchIncidentsFilters struct {
 	SearchQuery string             `json:"searchQuery"`
 	Priorities  []IncidentPriority `json:"priorities"`
 	ParentIDs   []string           `json:"parentIds"`
+	// ParentIncidentIDs filters to the child incidents of these incidents:
+	// incident.parent_incident_id (ServiceNow's parent_incident), not the
+	// generic work_item.parent_id ParentIDs matches. UUIDs. PostgreSQL only;
+	// the ServiceNow data source rejects it.
+	ParentIncidentIDs []string `json:"parentIncidentIds,omitempty"`
 	// Number filters to the incident whose human-readable number (e.g.
 	// "INC0010001") exactly matches (optional). Exact match against
 	// ServiceNow's `number` column, routed as a first-class filter rather
@@ -6980,7 +6985,12 @@ type IncidentView struct {
 	ResolutionNotes *string `json:"resolutionNotes"`
 	ResolvedBy      *string `json:"resolvedBy"`
 	ResolvedOn      *string `json:"resolvedOn"`
-	IncidentReport  *string `json:"incidentReport"`
+	// ResolvedWithParent is true when the incident was resolved because its
+	// parent incident was (ServiceNow's "Update Child Incidents" rule, ported
+	// to UpdateIncidentLifecycle), and false once it is resolved on its own.
+	// Always false on the ServiceNow data source.
+	ResolvedWithParent bool    `json:"resolvedWithParent"`
+	IncidentReport     *string `json:"incidentReport"`
 	// Description is ServiceNow's incident.description field (separate from Subject, which
 	// maps to the shorter short_description), read from work_item.description -- the same
 	// column every other work_item type already uses for its own long-form description.

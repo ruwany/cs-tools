@@ -672,6 +672,9 @@ func (s *incidentService) SearchIncidents(ctx context.Context, req domain.Search
 	if err := validateUUIDs("filters.parentIds", req.Filters.ParentIDs); err != nil {
 		return domain.SearchIncidentsResponse{}, err
 	}
+	if err := validateUUIDs("filters.parentIncidentIds", req.Filters.ParentIncidentIDs); err != nil {
+		return domain.SearchIncidentsResponse{}, err
+	}
 	priorities, states, serviceIDs, assignedUserIDs, madeSla, slaViolated, createdStart, createdEnd, err :=
 		parseIncidentFieldFiltersPostgres(req.Filters, time.Now().UTC())
 	if err != nil {
@@ -711,6 +714,9 @@ func (s *incidentService) SearchIncidents(ctx context.Context, req domain.Search
 func (s *incidentService) AggregateIncidents(ctx context.Context, req domain.AggregateIncidentsRequest) (domain.AggregateResponse, error) {
 	if !validIncidentAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	}
+	if err := validateUUIDs("filters.parentIncidentIds", req.Filters.ParentIncidentIDs); err != nil {
+		return domain.AggregateResponse{}, err
 	}
 	priorities, states, serviceIDs, assignedUserIDs, madeSla, slaViolated, createdStart, createdEnd, err :=
 		parseIncidentFieldFiltersPostgres(req.Filters, time.Now().UTC())
@@ -1068,13 +1074,15 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 		}
 	}
 
+	var resolvedChildren []repository.ResolvedChildIncident
 	if hasLifecycle || hasRecord {
 		if actor.ID != "" {
 			lifecycle.DefaultResolvedByID = &actor.ID
 		}
 		// The notes ride in the same transaction: a failed note leaves nothing saved.
 		lifecycle.WorkNotes, lifecycle.AdditionalComments = req.WorkNotes, req.AdditionalComments
-		if err := s.repo.UpdateIncidentLifecycle(ctx, req.ID, lifecycle, actor.Email); err != nil {
+		resolvedChildren, err = s.repo.UpdateIncidentLifecycle(ctx, req.ID, lifecycle, actor.Email)
+		if err != nil {
 			return domain.UpdateIncidentResponse{}, err
 		}
 	} else if err := s.repo.CreateIncidentNotes(ctx, req.ID, req.WorkNotes, req.AdditionalComments, actor.Email); err != nil {
@@ -1088,6 +1096,9 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 	}
 	publishIncidentStopSignals(ctx, s.eventPublisher, req, before, view)
 	s.recordIncidentFieldChanges(ctx, req, before, view, actor.Email)
+	// No ServiceNow mirror per child: ServiceNow's own rule resolves its children when the
+	// parent's update reaches it.
+	s.afterChildIncidentsResolved(ctx, resolvedChildren, actor.Email)
 
 	// Dual-write: a resolve with a workaround creates its problem in both stores.
 	problemID := s.createWorkaroundProblem(ctx, req, before, view)
