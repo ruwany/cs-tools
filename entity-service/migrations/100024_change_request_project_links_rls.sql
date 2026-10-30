@@ -14,20 +14,23 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- Row-level security for change_request_deployment, change_request_environment
--- and change_request_deployed_product (0191_change_request_project_links.sql),
--- split out into the dedicated RLS migration track (migrations/1NNNNN_*.sql,
+-- Row-level policies for the join tables in
+-- 0191_change_request_project_links.sql: change_request_deployment and
+-- change_request_deployed_product, and change_request_environment only where
+-- 0192 has not dropped it (see below).
+-- Split out into the dedicated RLS migration track (migrations/1NNNNN_*.sql,
 -- see entity-service/CLAUDE.md's "Database migrations" section) rather than
 -- living inline in the migration that creates these tables -- every other
 -- RLS statement in this codebase lives in that track, and 0191 originally
 -- mixed schema and RLS in one file only because it predates the track's
 -- existence.
 --
--- The three join tables are under FORCE ROW LEVEL SECURITY with the same
+-- Each table this file acts on gets ENABLE and FORCE ROW LEVEL SECURITY and
+-- three policies, for SELECT, INSERT and DELETE, with the same
 -- project-membership rule as work_item_tag / work_item_watcher (migration
--- 100008): internal callers see everything, a member sees the links of
--- change requests of their own project. Update is deliberately not a
--- policy: the repository only ever deletes and re-inserts the whole list.
+-- 100008): internal callers see everything, a member sees the links of change
+-- requests of their own project. Update is deliberately not a policy: the
+-- repository only ever deletes and re-inserts the whole list.
 -- (change_request_deployment is the one exception -- csm-sync-service's own
 -- writer needs an UPDATE policy too; see
 -- 100023_change_request_deployment_internal_update_policy.sql, which adds it
@@ -35,11 +38,31 @@
 -- POLICY has no dependency on another policy, or on ENABLE/FORCE ROW LEVEL
 -- SECURITY, already having run against the same table.)
 --
+-- 0192_change_request_drop_environments drops change_request_environment, and
+-- make migrate applies it in phase 1, before this track, so this file skips
+-- that table's block (see the comment above it). A database make migrate
+-- builds therefore ends with two tables under ENABLE and FORCE ROW LEVEL
+-- SECURITY, change_request_deployment and change_request_deployed_product,
+-- and six policies from this file, three on each; with 100023's UPDATE
+-- policy, change_request_deployment has four, seven in all. A database that
+-- still has change_request_environment (0191 applied, 0192 not) ends the
+-- same way, because make migrate applies 0192 before this file in the same
+-- run. The block acts only where this file runs while the table still exists
+-- (applied by hand ahead of 0192, say), and 0192's DROP TABLE then removes
+-- the table together with its three policies.
+--
 -- One transaction, and every CREATE POLICY preceded by its own DROP POLICY
--- IF EXISTS, matching every other migration in this track -- see
--- 100002_case_escalation_rls.sql's identical note for why (Postgres has no
--- CREATE POLICY IF NOT EXISTS).
+-- IF EXISTS, as in 100002_case_escalation_rls.sql -- see its note for why
+-- (Postgres has no CREATE POLICY IF NOT EXISTS).
+--
+-- ENABLE / FORCE ROW LEVEL SECURITY, DROP POLICY and CREATE POLICY each take
+-- an ACCESS EXCLUSIVE lock on their table, which waits behind every open
+-- transaction that has read or written it and holds up every reader and
+-- writer queued after it; csm-sync-service writes change_request_deployment
+-- too. lock_timeout makes a busy table fail the file instead, and the
+-- transaction keeps nothing; run it again.
 BEGIN;
+SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE change_request_deployment ENABLE ROW LEVEL SECURITY;
 ALTER TABLE change_request_deployment FORCE ROW LEVEL SECURITY;
@@ -62,15 +85,12 @@ CREATE POLICY change_request_deployment_delete ON change_request_deployment
         OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_deployment.change_request_id))
     );
 
--- change_request_environment exists only between 0191 and 0192, which drops it
--- (deployments carry the environment). Every 4-digit migration runs before this
--- track, so on a fresh database 0192 has already dropped it and the statements
--- below would fail with "relation does not exist". They are kept, guarded, for a
--- database where the table is still there; where it is gone there is nothing to
--- protect. Databases that already applied this file are unaffected (it is
--- recorded by filename and never re-run).
-DO $$
-BEGIN
+-- Only where the table still exists. 0192_change_request_drop_environments
+-- drops it, and make migrate applies this track after every 4-digit file, so
+-- on a database that has not recorded this file yet (a fresh one included)
+-- the table is already gone and an unguarded ALTER TABLE stops the run with
+-- `relation "change_request_environment" does not exist`.
+DO $$ BEGIN
     IF to_regclass('change_request_environment') IS NOT NULL THEN
         ALTER TABLE change_request_environment ENABLE ROW LEVEL SECURITY;
         ALTER TABLE change_request_environment FORCE ROW LEVEL SECURITY;
