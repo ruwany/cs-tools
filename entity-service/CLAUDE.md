@@ -6103,8 +6103,10 @@ earlier round reads "not recorded" rather than as the old proposer's, and is not
   (its contact had left the project, or another approval was being asked) would count again later, and Accept would apply the
   earlier round's time over the window the customers were asked about. A counter-proposal or a decline keeps the record.
 
-A stored time that another writer moved off its record (`customer_proposed_for` differs) names nobody, and so does a record whose
-user is gone. **No comment, audit, outbox or other log row is read** by the acts or the read model to name a
+A stored time that another writer moved off its record names nobody: the 0249 trigger (`BEFORE UPDATE OF state, customer_updated_on`)
+voids the record the same way when `customer_updated_on` changes to anything but the time the same UPDATE records, so the time
+moving back later does not name the contact again (a proposal writes the record for the time it stores and is left alone; a row
+with no record keeps the legacy rule). A record whose user is gone names nobody too. **No comment, audit, outbox or other log row is read** by the acts or the read model to name a
 proposer (the notice drainer's only input is the outbox row, whose snapshot carries the 0249 record itself; see Notices below), because those rows
 record what the system did and are no reference for a business rule such as whether Accept is allowed. The comment that trigger
 0053 writes on a parent record for each proposal is still written (above) and is never read;

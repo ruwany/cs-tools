@@ -475,10 +475,11 @@ func TestChangeRequestProposalIntegration_TheRecordNamesTheProposerOfTheStoredTi
 		f := newCustomerGroupFlow(t)
 		id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
 		f.mustPropose(id, crScopeUserA1, rsStart2)
-		// Another writer moves the stored time and leaves the customer as the last writer: neither
-		// the record (about rsStart2) nor the last writer (not read for a row that has a record) names anybody.
+		// Another writer moves the stored time and leaves the customer as the last writer: the 0249
+		// trigger voids the record (nobody, for the new time), and the last writer is not read for a
+		// row that has a record, so nobody is named.
 		f.syncWritesConversationAs(id, crFlowEmail(crScopeUserA1), sp(rsStart3), "")
-		f.wantProposalRecord(id, "after the stored time moved", crScopeUserA1, rsStart2)
+		f.wantProposalRecord(id, "after the stored time moved", "", rsStart3)
 		p := f.proposalOf(id)
 		if p == nil || p.Answer != "pending" || p.StartOn != rsStart3 || p.ProposerRecorded == nil || *p.ProposerRecorded || p.CanAccept == nil || *p.CanAccept ||
 			p.AcceptBlockedReason == nil || *p.AcceptBlockedReason != msgAcceptNobodyRecordedFull || p.ProposedByEmail != nil {
@@ -488,6 +489,21 @@ func TestChangeRequestProposalIntegration_TheRecordNamesTheProposerOfTheStoredTi
 			t.Fatalf("Alice's view after the stored time moved = %+v (%v), want history: unanswered", mine.CustomerProposal, err)
 		}
 		f.wantNoProposalToAnswer(id, rsStart3)
+
+		// The writer moves it back to the time Alice proposed: that is still not her proposal in its
+		// new place, so it still reads not recorded and Accept is still refused.
+		f.syncWritesConversationAs(id, crFlowEmail(crScopeUserA1), sp(rsStart2), "")
+		f.wantProposalRecord(id, "after the stored time moved back", "", rsStart2)
+		if p := f.proposalOf(id); p == nil || p.StartOn != rsStart2 || p.ProposerRecorded == nil || *p.ProposerRecorded || p.CanAccept == nil || *p.CanAccept {
+			t.Fatalf("customerProposal after the stored time moved back = %+v, want nobody recorded and Accept blocked", p)
+		}
+		_, err := f.accept(id)
+		wantRefusalCode(t, "Accept of a time moved back to a recorded value", err, 409, apierror.CodeChangeRequestProposerNotRecorded)
+
+		// A proposal still records itself: the trigger leaves a record written for the time it stores.
+		const bobsStart = "2030-03-22T09:00:00Z"
+		f.mustPropose(id, crScopeUserA2, bobsStart)
+		f.wantProposalRecord(id, "after Bob proposes", crScopeUserA2, bobsStart)
 	})
 
 	t.Run("a record that names nobody (its user gone: ON DELETE SET NULL) reads not recorded", func(t *testing.T) {

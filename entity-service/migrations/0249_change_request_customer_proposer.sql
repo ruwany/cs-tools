@@ -45,6 +45,12 @@
 -- does not see it: that PATCH voids the record the same way in its own UPDATE
 -- (patchChangeRequestTx).
 --
+-- It also voids the record when another writer (the sync, a manual fix, an import) moves the
+-- stored time off it: the record stays what it says, about a time that is no longer stored, but
+-- if the time later came back to the recorded value the record would name the contact again for a
+-- time they did not propose in its new place. A proposal writes the record for the time it stores
+-- in the same UPDATE, so the trigger leaves it alone; a row with no record keeps the legacy rule.
+--
 -- Safe to run again, and a run that stops partway is finished by the next one: every statement
 -- is guarded or replaces itself (TestChangeRequestProposalIntegration_ProposerMigrationIsSafeToRunAgain),
 -- and CREATE OR REPLACE TRIGGER swaps the trigger in one statement, so there is no moment without
@@ -64,13 +70,23 @@ BEGIN
         NEW.customer_proposed_by_user_id := NULL;
         NEW.customer_proposed_for := NEW.customer_updated_on;
         NEW.customer_proposed_on := NULL;
+    -- Another writer moved the stored time off the record: the record is history, voided the
+    -- same way, so the time moving back later is not read as that contact's proposal again. A
+    -- proposal writes the record for the time it stores, so it never matches; a legacy row
+    -- (customer_proposed_for NULL) is left to the last-writer rule.
+    ELSIF NEW.customer_updated_on IS DISTINCT FROM OLD.customer_updated_on
+          AND NEW.customer_proposed_for IS NOT NULL
+          AND NEW.customer_proposed_for IS DISTINCT FROM NEW.customer_updated_on THEN
+        NEW.customer_proposed_by_user_id := NULL;
+        NEW.customer_proposed_for := NEW.customer_updated_on;
+        NEW.customer_proposed_on := NULL;
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE TRIGGER change_request_void_customer_proposer
-    BEFORE UPDATE OF state ON change_request
+    BEFORE UPDATE OF state, customer_updated_on ON change_request
     FOR EACH ROW EXECUTE FUNCTION trg_change_request_void_customer_proposer();
 
 RESET lock_timeout;

@@ -82,7 +82,8 @@ import (
 // contact of the change's project (resolveProposer, readProposer); entering Customer Approval
 // voids it (the 0249 trigger), and so does a plain Re-schedule, which asks the customers again
 // without the state moving (patchChangeRequestTx), so a time left over from an earlier round is
-// nobody's proposal.
+// nobody's proposal. The 0249 trigger also voids it when another writer moves the stored time off
+// the record, so the time moving back later is not read as that contact's proposal again.
 // No comment, audit, outbox or other log row is read by the acts or the read model to name
 // anybody: those rows log what the system did and are no reference for a business rule such as
 // whether an Accept is allowed. (The notice drainer's only input is the outbox row, whose
