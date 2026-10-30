@@ -29,6 +29,7 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
 }));
 
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
+import { getFirstEmptyRequiredField } from "@features/csm-operations/utils/catalogVariables";
 
 /** Opens a MUI select by its accessible name and returns its option list. */
 function openSelect(name: RegExp | string): HTMLElement {
@@ -351,5 +352,18 @@ describe("CatalogVariableFields — read-only variables", () => {
     expect(cloud).not.toBeRequired();
     // The same kind of variable, editable, is marked.
     expect(screen.getByLabelText(/editable notes/i)).toBeRequired();
+  });
+
+  it("agrees with the submit gate on an empty mandatory read-only field: no mark, no block", () => {
+    const variables = [
+      { ...NOTES, id: "ro-text", questionText: "Read-only notes", mandatory: true, readOnly: true },
+      { ...NOTES, id: "rw-text", questionText: "Editable notes", mandatory: true },
+    ];
+    renderFields(variables);
+
+    expect(screen.getByLabelText(/read-only notes/i)).not.toBeRequired();
+    // The only field that blocks is the one that carries the mark.
+    expect(getFirstEmptyRequiredField(variables, {})).toBe("Editable notes");
+    expect(getFirstEmptyRequiredField(variables, { "rw-text": "filled" })).toBeNull();
   });
 });
