@@ -2831,7 +2831,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * renders an entry it has no curated config for via a generic fallback, so a
    * transition added on the backend needs no frontend change to appear.
    */
-  legalNextStates?: string[];
+  legalNextStates?: string[] | null;
 
   // --- CR field parity (2026-08-20) -----------------------------------
   // 20 keys the ServiceNow layer newly exposes on `GET /change-requests/{id}`
@@ -2878,7 +2878,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Free-form; e.g. `"10 mins"`. Parsing into a structured duration, if
    * ever needed, is CSM policy, not something ServiceNow enforces. */
   rollbackDurationText?: string | null;
-  deploymentProducts?: BeEntityRef[];
+  deploymentProducts?: BeEntityRef[] | null;
   /**
    * The change request's "Customer Group": the REGISTERED portal-user contacts
    * of its Customer Project, derived live by the backend and READ-ONLY (never
@@ -2886,7 +2886,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * without a project or without registered contacts); absent on other data
    * sources. They are the customer's approvers at Customer Approval / Review.
    */
-  customerContacts?: BeCustomerContact[];
+  customerContacts?: BeCustomerContact[] | null;
 
   /**
    * Read-through only — no write path is exposed anywhere in the stack for
@@ -2931,7 +2931,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Why it is on hold; `null` while it is not. */
   onHoldReason?: string | null;
   /** `read_only` in the ServiceNow dictionary — inherently read-only. */
-  labels?: string[];
+  labels?: string[] | null;
   /**
    * The tags attached to the change request — the same shape as a case's
    * {@link BeCaseView.tags}, and managed through the same case tag routes
@@ -2941,7 +2941,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * null/absent when the backend did not load them (another data source).
    */
   tags?: BeTag[] | null;
-  deployments?: BeEntityRef[];
+  deployments?: BeEntityRef[] | null;
 
   /** System-maintained, `read_only` in the ServiceNow dictionary. */
   workStart?: string | null;
