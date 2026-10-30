@@ -54,6 +54,23 @@ func newIncident(t *testing.T, pool *pgxpool.Pool, parentID string) string {
 	return resp.Incident.ID
 }
 
+// linkTo is the IncidentLifecycleUpdate.ParentIncidentID that links to parentID.
+func linkTo(parentID string) **string {
+	p := &parentID
+	return &p
+}
+
+// parentIncidentOf reads id's stored parent incident, nil when it has none.
+func parentIncidentOf(t *testing.T, pool *pgxpool.Pool, id string) *string {
+	t.Helper()
+	var parent *string
+	if err := repository.NewScoped(pool).QueryRow(repository.WithSystemIdentity(context.Background()),
+		`SELECT parent_incident_id::TEXT FROM incident WHERE id = $1`, id).Scan(&parent); err != nil {
+		t.Fatalf("read parent of %s: %v", id, err)
+	}
+	return parent
+}
+
 // updateIncident applies u as actor and returns the children the cascade resolved.
 func updateIncident(t *testing.T, pool *pgxpool.Pool, id string, u repository.IncidentLifecycleUpdate) []repository.ResolvedChildIncident {
 	t.Helper()
@@ -329,7 +346,7 @@ func TestIncidentParentLink_RejectsLoops(t *testing.T) {
 		"child":      {top, mid, "cannot be " + incidentNumber(t, pool, mid)},
 		"grandchild": {top, bottom, "cannot be " + incidentNumber(t, pool, bottom)},
 	} {
-		_, err := repo.UpdateIncidentLifecycle(ctx, tc.id, repository.IncidentLifecycleUpdate{ParentIncidentID: &tc.parent}, "ic-engineer@test.local")
+		_, err := repo.UpdateIncidentLifecycle(ctx, tc.id, repository.IncidentLifecycleUpdate{ParentIncidentID: linkTo(tc.parent)}, "ic-engineer@test.local")
 		var ve *apierror.ValidationError
 		if !errors.As(err, &ve) || !strings.Contains(ve.Msg, tc.want) {
 			t.Errorf("%s: got %v, want a ValidationError containing %q", name, err, tc.want)
@@ -340,8 +357,8 @@ func TestIncidentParentLink_RejectsLoops(t *testing.T) {
 		t.Errorf("refused links left top's parent = %v (err %v), want none", deref(parentOfTop), err)
 	}
 
-	updateIncident(t, pool, top, repository.IncidentLifecycleUpdate{ParentIncidentID: &other})
-	updateIncident(t, pool, bottom, repository.IncidentLifecycleUpdate{ParentIncidentID: &top}) // re-parenting up the chain is fine
+	updateIncident(t, pool, top, repository.IncidentLifecycleUpdate{ParentIncidentID: linkTo(other)})
+	updateIncident(t, pool, bottom, repository.IncidentLifecycleUpdate{ParentIncidentID: linkTo(top)}) // re-parenting up the chain is fine
 }
 
 // TestChildIncidentCascade_DepthCapRollsBack: a chain deeper than the cap
@@ -367,5 +384,33 @@ func TestChildIncidentCascade_DepthCapRollsBack(t *testing.T) {
 		if r := readResolution(t, pool, id); deref(r.state) != "NEW" || r.withParent || len(r.notesByType) != 0 {
 			t.Errorf("level %d: state=%s with_parent=%v notes=%v after the refused resolve, want it untouched", i, deref(r.state), r.withParent, r.notesByType)
 		}
+	}
+}
+
+// TestChildIncidentCascade_UnlinkClearsTheParent: a ParentIncidentID holding
+// nil (the edit dialog's cleared Parent incident picker) unlinks the incident,
+// and a nil ParentIncidentID leaves the link alone.
+func TestChildIncidentCascade_UnlinkClearsTheParent(t *testing.T) {
+	pool := incidentTaskGatePool(t)
+	parent := newIncident(t, pool, "")
+	child := newIncident(t, pool, parent)
+
+	subject := "renamed"
+	updateIncident(t, pool, child, repository.IncidentLifecycleUpdate{Subject: &subject})
+	if got := parentIncidentOf(t, pool, child); got == nil || *got != parent {
+		t.Fatalf("an update without ParentIncidentID changed the parent to %v, want %s", deref(got), parent)
+	}
+
+	updateIncident(t, pool, child, repository.IncidentLifecycleUpdate{ParentIncidentID: new(*string)})
+	if got := parentIncidentOf(t, pool, child); got != nil {
+		t.Fatalf("unlink left parent = %s, want none", *got)
+	}
+
+	// Resolving the former parent no longer touches the unlinked incident.
+	code, notes := "SOLVED_PERMANENTLY", "fixed"
+	if resolved := updateIncident(t, pool, parent, repository.IncidentLifecycleUpdate{
+		State: strp("RESOLVED"), ResolutionCode: &code, ResolutionNotes: &notes,
+	}); len(resolved) != 0 {
+		t.Fatalf("resolving the former parent resolved %d children, want 0", len(resolved))
 	}
 }

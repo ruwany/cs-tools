@@ -25407,7 +25407,8 @@ components:
             Makes this incident a child of the given incident (returned as
             parentIncident). Not the same link as parentId. On the PostgreSQL
             data source, 400 when it names the incident itself or one of its
-            own descendants.
+            own descendants. An explicit null unlinks it from its parent;
+            omitting the field leaves the link as it is.
         assignmentGroupId:
           type: string
           format: uuid

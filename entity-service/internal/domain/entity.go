@@ -6898,37 +6898,41 @@ type CreateIncidentResponse struct {
 // UpdateIncidentRequest is the input for PATCH /incidents/{id}. All fields are optional,
 // but at least one must be provided.
 type UpdateIncidentRequest struct {
-	ID                  string                  `json:"-"`
-	Subject             *string                 `json:"subject,omitempty"`
-	Priority            *IncidentPriority       `json:"priority,omitempty"`
-	State               *IncidentState          `json:"state,omitempty"`
-	Category            *IncidentCategory       `json:"category,omitempty"`
-	Subcategory         *IncidentSubcategory    `json:"subcategory,omitempty"`
-	ContactType         *IncidentContactType    `json:"contactType,omitempty"`
-	Impact              *IncidentImpact         `json:"impact,omitempty"`
-	Urgency             *IncidentUrgency        `json:"urgency,omitempty"`
-	ResolutionCode      *IncidentResolutionCode `json:"resolutionCode,omitempty"`
-	ParentID            *string                 `json:"parentId,omitempty"`
-	ParentIncidentID    *string                 `json:"parentIncidentId,omitempty"`
-	AssignmentGroupID   *string                 `json:"assignmentGroupId,omitempty"`
-	AssignedEngineerID  *string                 `json:"assignedEngineerId,omitempty"`
-	ServiceID           *string                 `json:"serviceId,omitempty"`
-	ServiceOfferingID   *string                 `json:"serviceOfferingId,omitempty"`
-	ConfigurationItemID *string                 `json:"configurationItemId,omitempty"`
-	ChangeRequestID     *string                 `json:"changeRequestId,omitempty"`
-	ProblemID           *string                 `json:"problemId,omitempty"`
-	CausedByID          *string                 `json:"causedById,omitempty"`
-	ResolvedByID        *string                 `json:"resolvedById,omitempty"`
-	ResolutionNotes     *string                 `json:"resolutionNotes,omitempty"`
-	IncidentReport      *string                 `json:"incidentReport,omitempty"`
-	AdditionalComments  *string                 `json:"additionalComments,omitempty"`
-	WorkNotes           *string                 `json:"workNotes,omitempty"`
-	WatchList           *[]string               `json:"watchList,omitempty"`
+	ID             string                  `json:"-"`
+	Subject        *string                 `json:"subject,omitempty"`
+	Priority       *IncidentPriority       `json:"priority,omitempty"`
+	State          *IncidentState          `json:"state,omitempty"`
+	Category       *IncidentCategory       `json:"category,omitempty"`
+	Subcategory    *IncidentSubcategory    `json:"subcategory,omitempty"`
+	ContactType    *IncidentContactType    `json:"contactType,omitempty"`
+	Impact         *IncidentImpact         `json:"impact,omitempty"`
+	Urgency        *IncidentUrgency        `json:"urgency,omitempty"`
+	ResolutionCode *IncidentResolutionCode `json:"resolutionCode,omitempty"`
+	ParentID       *string                 `json:"parentId,omitempty"`
+	// ParentIncidentID: nil leaves the parent incident as it is, a non-nil
+	// pointer holding nil (an explicit `null`) clears it, as Environment.
+	// See UnmarshalJSON.
+	ParentIncidentID    **string  `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string   `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string   `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string   `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string   `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string   `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string   `json:"changeRequestId,omitempty"`
+	ProblemID           *string   `json:"problemId,omitempty"`
+	CausedByID          *string   `json:"causedById,omitempty"`
+	ResolvedByID        *string   `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string   `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string   `json:"incidentReport,omitempty"`
+	AdditionalComments  *string   `json:"additionalComments,omitempty"`
+	WorkNotes           *string   `json:"workNotes,omitempty"`
+	WatchList           *[]string `json:"watchList,omitempty"`
 	// Environment: see CreateIncidentRequest.Environment doc comment. Double
 	// pointer distinguishes "omitted" (nil) from an explicit `null` clear
 	// (non-nil outer, nil inner) from a new value (non-nil, non-nil) -- a
 	// single *string can't tell omitted apart from explicit null on decode,
-	// same convention as ChangeRequest's CustomerGroupID.
+	// same convention as ChangeRequest's CustomerGroupID. encoding/json alone
+	// decodes a `null` as omitted; UnmarshalJSON is what makes it a clear.
 	Environment **string `json:"environment"`
 }
 

@@ -335,7 +335,7 @@ type IncidentLifecycleUpdate struct {
 	ChangeRequestID     *string
 	ProblemID           *string
 	CausedByID          *string
-	ParentIncidentID    *string
+	ParentIncidentID    **string // non-nil outer, nil inner unlinks it from its parent
 	IncidentReport      *string
 	Environment         **string  // non-nil outer, nil inner clears it
 	WatchList           *[]string // replaces the whole list, as ServiceNow does; empty clears it
@@ -1727,8 +1727,9 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 	// Before the row lock: checkParentIncident's advisory lock must come first
 	// in every transaction that takes both, or a re-link waiting for it while
 	// holding this row can deadlock with a resolve whose cascade wants this row.
-	if u.ParentIncidentID != nil {
-		if err := checkParentIncident(ctx, tx, id, *u.ParentIncidentID); err != nil {
+	// An unlink needs no check: it cannot make a loop.
+	if u.ParentIncidentID != nil && *u.ParentIncidentID != nil {
+		if err := checkParentIncident(ctx, tx, id, **u.ParentIncidentID); err != nil {
 			return nil, err
 		}
 	}
@@ -1934,7 +1935,13 @@ func (r *incidentRepo) addIncidentRecordFields(ctx context.Context, tx pgx.Tx, u
 	set("change_request_id = $%d::uuid", u.ChangeRequestID)
 	set("problem_id = $%d::uuid", u.ProblemID)
 	set("caused_by_id = $%d::uuid", u.CausedByID)
-	set("parent_incident_id = $%d::uuid", u.ParentIncidentID)
+	if u.ParentIncidentID != nil {
+		if *u.ParentIncidentID == nil {
+			*incSets = append(*incSets, "parent_incident_id = NULL")
+		} else {
+			addInc("parent_incident_id = $%d::uuid", **u.ParentIncidentID)
+		}
+	}
 	set("incident_report = $%d", u.IncidentReport)
 	if u.Environment != nil {
 		if *u.Environment == nil {

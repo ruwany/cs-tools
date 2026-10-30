@@ -1460,31 +1460,33 @@ func mapSNIncidentSpecialistHandoffSummary(sn snIncidentSpecialistHandoffSummary
 
 // snUpdateIncidentPayload is the Choreo PATCH /incidents/{id} request body.
 type snUpdateIncidentPayload struct {
-	Subject             *string   `json:"subject,omitempty"`
-	PriorityKey         *int      `json:"priorityKey,omitempty"`
-	StateKey            *int      `json:"stateKey,omitempty"`
-	CategoryKey         *string   `json:"categoryKey,omitempty"`
-	SubcategoryKey      *string   `json:"subcategoryKey,omitempty"`
-	ContactTypeKey      *string   `json:"contactTypeKey,omitempty"`
-	ImpactKey           *int      `json:"impactKey,omitempty"`
-	UrgencyKey          *int      `json:"urgencyKey,omitempty"`
-	ResolutionCodeKey   *string   `json:"resolutionCodeKey,omitempty"`
-	ParentID            *string   `json:"parentId,omitempty"`
-	ParentIncidentID    *string   `json:"parentIncidentId,omitempty"`
-	AssignmentGroupID   *string   `json:"assignmentGroupId,omitempty"`
-	AssignedEngineerID  *string   `json:"assignedEngineerId,omitempty"`
-	ServiceID           *string   `json:"serviceId,omitempty"`
-	ServiceOfferingID   *string   `json:"serviceOfferingId,omitempty"`
-	ConfigurationItemID *string   `json:"configurationItemId,omitempty"`
-	ChangeRequestID     *string   `json:"changeRequestId,omitempty"`
-	ProblemID           *string   `json:"problemId,omitempty"`
-	CausedByID          *string   `json:"causedById,omitempty"`
-	ResolvedByID        *string   `json:"resolvedById,omitempty"`
-	ResolutionNotes     *string   `json:"resolutionNotes,omitempty"`
-	IncidentReport      *string   `json:"incidentReport,omitempty"`
-	AdditionalComments  *string   `json:"additionalComments,omitempty"`
-	WorkNotes           *string   `json:"workNotes,omitempty"`
-	WatchList           *[]string `json:"watchList,omitempty"`
+	Subject           *string `json:"subject,omitempty"`
+	PriorityKey       *int    `json:"priorityKey,omitempty"`
+	StateKey          *int    `json:"stateKey,omitempty"`
+	CategoryKey       *string `json:"categoryKey,omitempty"`
+	SubcategoryKey    *string `json:"subcategoryKey,omitempty"`
+	ContactTypeKey    *string `json:"contactTypeKey,omitempty"`
+	ImpactKey         *int    `json:"impactKey,omitempty"`
+	UrgencyKey        *int    `json:"urgencyKey,omitempty"`
+	ResolutionCodeKey *string `json:"resolutionCodeKey,omitempty"`
+	ParentID          *string `json:"parentId,omitempty"`
+	// ParentIncidentID is json.RawMessage, as Environment is, so a clear
+	// reaches ServiceNow as a real `null` rather than being left out.
+	ParentIncidentID    json.RawMessage `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string         `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string         `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string         `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string         `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string         `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string         `json:"changeRequestId,omitempty"`
+	ProblemID           *string         `json:"problemId,omitempty"`
+	CausedByID          *string         `json:"causedById,omitempty"`
+	ResolvedByID        *string         `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string         `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string         `json:"incidentReport,omitempty"`
+	AdditionalComments  *string         `json:"additionalComments,omitempty"`
+	WorkNotes           *string         `json:"workNotes,omitempty"`
+	WatchList           *[]string       `json:"watchList,omitempty"`
 	// Environment: see snCreateIncidentPayload.Environment doc comment.
 	// json.RawMessage (not *string) so an explicit clear can be forwarded to
 	// ServiceNow as a real `null`, not just omitted -- same pattern as
@@ -1552,7 +1554,7 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 
 	optionalUUIDs := map[string]*string{
 		"parentId":            req.ParentID,
-		"parentIncidentId":    req.ParentIncidentID,
+		"parentIncidentId":    setValueOf(req.ParentIncidentID),
 		"assignmentGroupId":   req.AssignmentGroupID,
 		"assignedEngineerId":  req.AssignedEngineerID,
 		"serviceId":           req.ServiceID,
@@ -1644,8 +1646,15 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 		payload.ParentID = &v
 	}
 	if req.ParentIncidentID != nil {
-		v := uuidToSysid(*req.ParentIncidentID)
-		payload.ParentIncidentID = &v
+		var v any
+		if *req.ParentIncidentID != nil {
+			v = uuidToSysid(**req.ParentIncidentID)
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.UpdateIncidentResponse{}, fmt.Errorf("sn update incident: marshal parentIncidentId: %w", err)
+		}
+		payload.ParentIncidentID = raw
 	}
 	if req.AssignmentGroupID != nil {
 		v := uuidToSysid(*req.AssignmentGroupID)

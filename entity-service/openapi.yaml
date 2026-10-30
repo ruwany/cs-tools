@@ -31523,6 +31523,9 @@ components:
           type: string
           format: uuid
           nullable: true
+          description: >-
+            Makes this incident a child of the given incident. An explicit null
+            unlinks it from its parent; omitting the field leaves the link as it is.
         assignmentGroupId:
           type: string
           format: uuid

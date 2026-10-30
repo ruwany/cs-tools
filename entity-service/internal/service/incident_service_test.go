@@ -966,7 +966,7 @@ func TestIncidentService_UpdateIncident_RecordFieldsWrittenAndMirrored(t *testin
 }
 
 // TestIncidentService_UpdateIncident_EnvironmentClear: an explicit null for
-// environment clears it, the one field that can be cleared.
+// environment clears it.
 func TestIncidentService_UpdateIncident_EnvironmentClear(t *testing.T) {
 	var got repository.IncidentLifecycleUpdate
 	repo := &stubIncidentRepo{
@@ -986,6 +986,45 @@ func TestIncidentService_UpdateIncident_EnvironmentClear(t *testing.T) {
 	}
 	if got.Environment == nil || *got.Environment != nil {
 		t.Errorf("environment = %v, want an explicit clear", got.Environment)
+	}
+}
+
+// TestIncidentService_UpdateIncident_ParentIncidentClear: an explicit null for
+// parentIncidentId reaches the repository as a clear, and a set value as itself.
+func TestIncidentService_UpdateIncident_ParentIncidentClear(t *testing.T) {
+	var got repository.IncidentLifecycleUpdate
+	repo := &stubIncidentRepo{
+		updateIncidentLifecycle: func(_ context.Context, _ string, u repository.IncidentLifecycleUpdate, _ string) error {
+			got = u
+			return nil
+		},
+		getIncidentByID: func(_ context.Context, id string) (domain.IncidentView, error) {
+			return newTestIncidentView(id), nil
+		},
+	}
+	svc := NewIncidentServiceWithPublisher(repo, stubUpdateIncidentUserRepo{email: "jane.doe@example.com"}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	if _, err := svc.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: testDeploymentUUID, ParentIncidentID: new(*string)}); err != nil {
+		t.Fatalf("UpdateIncident(parentIncidentId: null): %v", err)
+	}
+	if got.ParentIncidentID == nil || *got.ParentIncidentID != nil {
+		t.Errorf("parentIncidentId = %v, want an explicit clear", got.ParentIncidentID)
+	}
+
+	parent := testIncidentUUID
+	set := &parent
+	if _, err := svc.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: testDeploymentUUID, ParentIncidentID: &set}); err != nil {
+		t.Fatalf("UpdateIncident(parentIncidentId: %s): %v", parent, err)
+	}
+	if got.ParentIncidentID == nil || *got.ParentIncidentID == nil || **got.ParentIncidentID != parent {
+		t.Errorf("parentIncidentId = %v, want %s", got.ParentIncidentID, parent)
+	}
+
+	bad := "not-a-uuid"
+	badPtr := &bad
+	if _, err := svc.UpdateIncident(ctx, domain.UpdateIncidentRequest{ID: testDeploymentUUID, ParentIncidentID: &badPtr}); err == nil {
+		t.Error("a parentIncidentId that is not a UUID must be refused")
 	}
 }
 

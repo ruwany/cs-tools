@@ -8676,7 +8676,9 @@ state transition, work notes / comments, and the record's own fields -- everythi
 (`IncidentRepository.UpdateIncidentLifecycle`) and mirrored to ServiceNow as sent. A change to
 impact or urgency recomputes priority with ServiceNow's lookup; a new category that does not hold
 the current subcategory clears it; `watchList` replaces `work_item_watcher`. A field sent as
-`null` is ignored, as on the ServiceNow path; only `environment` can be cleared.
+`null` is ignored, as on the ServiceNow path; only `parentIncidentId` and `environment` can be
+cleared (`UpdateIncidentRequest.UnmarshalJSON` keeps their explicit `null` apart from an omitted
+field; the ServiceNow mirror sends it as a real `null`).
 
 `IncidentView.WatchList` is read from `work_item_watcher` (`incidentWatchers`), the
 table `UpdateIncidentLifecycle`'s `watchList` replaces. The CSM list's bulk edit adds
@@ -11092,7 +11094,8 @@ read as `parentIncident`, written as `parentIncidentId`). It is **not** `work_it
 - **No loops:** `UpdateIncidentLifecycle` refuses (400) a `parentIncidentId` that is the incident
   itself or any incident below it (`checkParentIncident`: `WITH RECURSIVE ... UNION` up the
   parent chain, under a transaction advisory lock so two concurrent re-links cannot each pass).
-  Create needs no check: a new incident has no children.
+  Create needs no check: a new incident has no children. `{"parentIncidentId": null}` unlinks the
+  incident (the edit dialog's cleared picker); an unlink needs no check.
 - **Resolve cascade** (`cascadeChildIncidentResolution`, ServiceNow's OOB "Update Child
   Incidents"): when an incident enters RESOLVED, every child not RESOLVED/CLOSED/CANCELED (NEW and
   ON_HOLD too) is resolved in the same transaction: the child's own `resolution_code` and
