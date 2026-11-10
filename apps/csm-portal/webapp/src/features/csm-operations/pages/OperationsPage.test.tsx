@@ -48,6 +48,9 @@ vi.mock("@features/csm-operations/components/OutagesTab", () => ({
 vi.mock("@features/csm-operations/components/RunbooksTab", () => ({
   default: () => <div data-testid="tab-content">runbooks</div>,
 }));
+vi.mock("@features/csm-operations/components/cab-dashboard/CabOperationsDashboard", () => ({
+  default: () => <div data-testid="tab-content">cab dashboard</div>,
+}));
 vi.mock("@features/csm-operations/components/StandardChangesTab", () => ({
   default: ({ show }: { show: string }) => <div data-testid="tab-content">{`standard changes: ${show}`}</div>,
 }));
@@ -157,6 +160,16 @@ describe("OperationsPage — header", () => {
     expect(screen.queryByText("Operations")).not.toBeInTheDocument();
     expect(screen.queryByText(OPERATIONS_SUBTITLE)).not.toBeInTheDocument();
     expect(screen.queryByText(/service requests|incidents|problems|runbooks/i)).not.toBeInTheDocument();
+  });
+
+  it("heads the CAB dashboard with its own title, and renders it", () => {
+    renderAt("/operations/cab-dashboard");
+    expect(heading()).toEqual({
+      title: "CAB dashboard",
+      subtitle: "What the CAB was asked to decide, and how it decided.",
+    });
+    expect(content()).toBe("cab dashboard");
+    expect(screen.queryByRole("tablist", { name: "Change requests" })).not.toBeInTheDocument();
   });
 
   it("switches the heading with the sub-view", () => {

@@ -2991,6 +2991,234 @@ export interface BeChangeRequestApprovalDecisionResponse {
   state: string;
 }
 
+// --- The CAB operations report (`GET /reports/cab-operations`) -------------
+//
+// What the CAB was asked to decide over a period, and how it decided (the
+// Operations > CAB dashboard page). One change request counts once, in the
+// period of its LATEST CAB stage: "asked on" is when that stage was created
+// (the database records no CAB meeting). Every date is UTC. Mirrors
+// entity-service's domain/cab_operations_report.go.
+
+/** What the CAB did with a change request's latest CAB stage. CANCELLED: nobody decided and the change request is
+ * no longer waiting for the CAB. */
+export type BeCABOperationsOutcome = "APPROVED" | "REJECTED" | "PENDING" | "CANCELLED";
+
+/** The report's change model buckets (every other `change_model`, or none, is `other`). */
+export type BeCABOperationsModel = "normal" | "standard" | "emergency" | "other";
+
+export interface BeCABOperationsModelCounts {
+  normal: number;
+  standard: number;
+  emergency: number;
+  other: number;
+}
+
+/** The figures of a set of change requests (a month, or the whole period). */
+export interface BeCABOperationsCounts {
+  total: number;
+  approved: number;
+  rejected: number;
+  pending: number;
+  cancelled: number;
+  /** approved / (approved + rejected), 0 to 1; null when the CAB decided none. */
+  approvalRate: number | null;
+  /** Change requests with a primary production deployment. */
+  prod: number;
+  /** Change requests whose "Service outage / downtime" field is filled in (full or partial is not recorded). */
+  outageDeclared: number;
+  byModel: BeCABOperationsModelCounts;
+}
+
+/** A count for one team. `id` is null for change requests with no assignment group. */
+export interface BeCABOperationsNamedCount {
+  id: string | null;
+  name: string;
+  count: number;
+}
+
+export interface BeCABOperationsTotals extends BeCABOperationsCounts {
+  /** How many different CAB members decided at least once. */
+  approvers: number;
+}
+
+export interface BeCABOperationsMonth extends BeCABOperationsCounts {
+  /** YYYY-MM. */
+  month: string;
+  /** The current month: its figures are so far only. */
+  ongoing: boolean;
+  /** The month's three busiest assignment groups. */
+  topTeams: BeCABOperationsNamedCount[];
+}
+
+/** One day of the period (every day is listed, zero or not). */
+export interface BeCABOperationsDay {
+  /** YYYY-MM-DD. */
+  day: string;
+  total: number;
+  approved: number;
+  rejected: number;
+  prod: number;
+  outageDeclared: number;
+  standard: number;
+  emergency: number;
+}
+
+/** One ISO week (Monday to Sunday) overlapping the period. */
+export interface BeCABOperationsWeek {
+  /** The Monday, YYYY-MM-DD. */
+  weekStart: string;
+  total: number;
+  byModel: BeCABOperationsModelCounts;
+  /** One entry per `weeklyTeams` team, in that order. */
+  byTeam: BeCABOperationsNamedCount[];
+  /** Every other team (no group included). */
+  otherTeams: number;
+}
+
+export interface BeCABOperationsTeamRef {
+  id: string | null;
+  name: string;
+}
+
+export interface BeCABOperationsCustomer {
+  /** Null for change requests with no customer project. */
+  accountId: string | null;
+  name: string;
+  total: number;
+  approved: number;
+  rejected: number;
+  standard: number;
+  emergency: number;
+}
+
+/** One assignment group's figures (the database records no delivery stream, so a team stands in for one). */
+export interface BeCABOperationsTeam {
+  groupId: string | null;
+  name: string;
+  total: number;
+  approved: number;
+  rejected: number;
+  approvalRate: number | null;
+  outageDeclared: number;
+  standard: number;
+  emergency: number;
+}
+
+/** One CAB member's decisions on the CAB stages of the period's change requests. */
+export interface BeCABOperationsApprover {
+  userId: string | null;
+  name: string;
+  email: string;
+  decisions: number;
+  approved: number;
+  rejected: number;
+  /** Their non-blank comments. */
+  comments: number;
+}
+
+export interface BeCABOperationsRequester {
+  userId: string;
+  name: string;
+  total: number;
+}
+
+/** A change request waiting for the CAB. */
+export interface BeCABOperationsQueueItem {
+  id: string;
+  number: string;
+  subject: string;
+  accountName: string;
+  model: BeCABOperationsModel;
+  /** Deployment type (PRIMARY_PRODUCTION when any of its deployments is one), "" with no deployment. */
+  environment: string;
+  plannedStart: string | null;
+  outageDeclared: boolean;
+  /** When the CAB was asked (RFC 3339). */
+  askedOn: string;
+  /** The CAB members still asked, in the order asked. */
+  approvers: string[];
+}
+
+/** One change request of the period. */
+export interface BeCABOperationsRegistryItem {
+  id: string;
+  number: string;
+  subject: string;
+  /** The change request's state (`change_request_state_enum`, upper case: AUTHORIZE, CLOSED, ...). */
+  state: string;
+  accountName: string;
+  model: BeCABOperationsModel;
+  environment: string;
+  assignmentGroup: string;
+  requestedBy: string;
+  outageDeclared: boolean;
+  /** The start of the declared outage text (plain text, at most 300 characters), "" when none. */
+  outageSummary: string;
+  outcome: BeCABOperationsOutcome;
+  decidedBy: string;
+  decidedOn: string | null;
+  /** The latest non-blank comment on any of its CAB stages, as plain text. */
+  cabComment: string;
+  askedOn: string;
+  plannedStart: string | null;
+}
+
+/** A CAB rejection (with or without a comment), or a CAB comment on any other decision. */
+export interface BeCABOperationsPushbackItem {
+  changeRequestId: string;
+  number: string;
+  subject: string;
+  accountName: string;
+  kind: "REJECTION" | "COMMENT";
+  /** The approver row's state (APPROVED, REJECTED, ...). */
+  decision: string;
+  approverName: string;
+  /** Plain text, "" for a rejection without one. */
+  comment: string;
+  decidedOn: string;
+}
+
+/** A member of the "CAB Approval" group who may decide a CAB stage. */
+export interface BeCABOperationsMember {
+  userId: string;
+  name: string;
+  email: string;
+}
+
+/** `GET /reports/cab-operations?from=YYYY-MM-DD&to=YYYY-MM-DD` response. */
+export interface BeCABOperationsReport {
+  /** The inclusive period, YYYY-MM-DD (UTC). */
+  from: string;
+  to: string;
+  /** When the report was built (RFC 3339). */
+  generatedOn: string;
+  /** The month of `generatedOn`, YYYY-MM: the ongoing one. */
+  currentMonth: string;
+  totals: BeCABOperationsTotals;
+  months: BeCABOperationsMonth[];
+  daily: BeCABOperationsDay[];
+  weeklyTeams: BeCABOperationsTeamRef[];
+  weekly: BeCABOperationsWeek[];
+  /** Highest total first. */
+  customers: BeCABOperationsCustomer[];
+  /** Highest total first. */
+  teams: BeCABOperationsTeam[];
+  /** Most decisions first. */
+  approvers: BeCABOperationsApprover[];
+  /** The ten who raised the most. */
+  requesters: BeCABOperationsRequester[];
+  /** Oldest asked first. */
+  queue: BeCABOperationsQueueItem[];
+  /** Newest asked first, at most 2000 rows; `registryTotal` is the full count. */
+  registry: BeCABOperationsRegistryItem[];
+  registryTotal: number;
+  truncated: boolean;
+  /** Newest first, at most 200 items; `pushbackTotal` is the full count. */
+  pushback: BeCABOperationsPushbackItem[];
+  pushbackTotal: number;
+  cabMembers: BeCABOperationsMember[];
+}
+
 /**
  * `POST /change-requests` body (ServiceNow data source only). `subject` is
  * the only required field; every ID field (`groupId`, `assignedEngineerId`,

@@ -880,6 +880,58 @@ honours `mutate(input, {onSuccess, onError})` and its `lcClickDecision` helper c
 page object `approve()` / `reject(name, comment)` / `decisionDialog()`, and the fake API stores the comment
 on the row.
 
+## CAB dashboard (Operations > CAB dashboard)
+
+`/operations/cab-dashboard`: nav node `operations.cab-dashboard` (`tab: "cab_dashboard"`, so the path
+segment comes from `usePathSectionTabs` like every other Operations tab; `requires: "canUseOperations"`),
+rendered by `OperationsPage` with its own heading (`CAB_DASHBOARD_HEADING`). It is
+`components/cab-dashboard/CabOperationsDashboard.tsx`, modelled on the "CAB Operations & Governance" sheet,
+and reads **one** request, `GET /reports/cab-operations` (`useGetCABOperationsReport`,
+`BeCABOperationsReport` in `api/backend/types.ts`, `ApiQueryKeys.CAB_OPERATIONS_REPORT`, internal callers
+only at the entity service, `PermViewOperations` at the BFF).
+
+- **URL**: `from` / `to` (UTC days; none is the backend's default, the last four calendar months), `month`
+  (one of the report's months, else All) and `view` (the tab; Overview has none). Only `from` / `to` change
+  the request; the month chips and the tabs narrow what is shown of the one report, so they cost nothing.
+  A changed period keeps the previous report on screen (`keepPreviousData`, a progress bar) until the new
+  one comes. `cabPeriodProblem` refuses a start after the end or more than 24 calendar months **before**
+  asking (the hook's `enabled: false`), with the backend's own rule. The range uses `DateRangeFilterFields`
+  ("CAB asked from/to (UTC)", capped at today). The nav node's `views` name each tab for Recent / Pin
+  ("CAB pushback"); `cabOperations.test.ts` keeps them equal to `CAB_DASHBOARD_VIEWS`.
+- **What the month filter narrows**: Overview, Registry, Downtime & risk (by when the CAB was asked) and
+  Pushback (by when the member decided). Trends, Governance and the Summary report are always the whole
+  period (the report has no team, customer or approver figures per month), and the Review queue is "now";
+  with a month picked those tabs say "The month filter does not apply to this tab."
+- **KPI tiles and month-over-month** (`cabKpis` / `formatKpiDelta` in `utils/cabOperations.ts`): All shows
+  the period's totals with no comparison. A month is compared with the month before when that month is in
+  the period and the picked one is complete: counts as a difference with its share ("+4 (+50%) vs Sep
+  2026", no share against 0), the approval rate in points ("+15 pts"). The **ongoing** month (the report's
+  `currentMonth`, `ongoing: true`) gets a banner with its figures so far and is never compared, since a part
+  month against a whole one always reads as a fall. Sparklines are the selection's `daily` values (the
+  rate per day, with gaps on days nothing was decided); "Awaiting the CAB" has none, as the report has no
+  per-day open count.
+- **Charts**: `CabCharts.tsx` on `@wso2/oxygen-ui-charts-react` the way `DashboardLineChart` uses it (no
+  animation, a hand-drawn legend, theme palette colours so both schemes work; team series reuse
+  `useReportChartColors`). The classification is a plain proportion bar (one proportion, not a series).
+  Tests replace the chart library with recorders of what each chart is handed (jsdom draws no SVG).
+- **No decisions here**: change request numbers link to `/operations/change-requests/<id>` (with `from` and
+  `parentState`, so Back returns to the dashboard view), where the CAB approves or rejects;
+  `useDecideChangeRequestApproval` invalidates the report so the queue is current when you come back.
+- **Summary report**: `cabSummary` builds the figures shown on the tab and in the PDF;
+  **Export as PDF** (`ExportPdfButton`) loads `utils/cabOperationsReportPdf.ts` on demand (the PDF report kit,
+  like the change request report). It is a PDF rather than `window.print()`: the app already has a PDF
+  report mechanism, and printing the dashboard would print the app shell around it.
+- **What the data cannot show** is said on the page (`CAB_SHORT_NOTES`, under the filters) and in the
+  summary (`CAB_DATA_NOTES`): presented = when the CAB was asked (the latest CAB stage's creation; no CAB
+  meeting is recorded), teams stand in for streams, an outage is "declared" (full vs partial is not
+  recorded). Do not add a figure the report does not carry; extend the report instead
+  (`entity-service/internal/domain/cab_operations_report.go`).
+- Tests: `utils/cabOperations.test.ts` (periods, MoM, sparklines, burn-up, weekly stacks, registry filters,
+  summary), `components/cab-dashboard/CabOperationsDashboard.test.tsx` (every tab from
+  `test/cabOperationsFixture.ts`, the month filter, the deltas, the ongoing month, loading / error / bad
+  period), `api/useGetCABOperationsReport.test.tsx`, `utils/cabOperationsReportPdf.test.ts`. User help:
+  `features/help/content/operations.md`, "CAB dashboard".
+
 ## Change request lifecycle stepper
 
 `ChangeRequestLifecycleStepper` (full width, under the detail page's header) plots the **customer portal's eleven-stage "Change Request Workflow"**, in its order and its wording -- New, Assess, Authorize, Customer Approval, Scheduled, Implement, Review, Customer Review, **Rollback**, Closed, **Canceled** -- as a *horizontal* line (the customer portal's is a vertical timeline). Everything it decides is the pure `buildChangeRequestLifecycle` (`features/csm-operations/utils/changeRequestStages.ts`, unit-tested for every state x checkbox combination); the component only draws it.

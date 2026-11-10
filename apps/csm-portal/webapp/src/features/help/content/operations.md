@@ -293,6 +293,44 @@ From the detail page a CS engineer can:
   or an admin, can edit or delete it from the **⋮** menu on that comment — deleting is a soft,
   audited removal (an admin can still read the original text; nobody else can).
 
+## CAB dashboard
+
+The CAB dashboard shows what the CAB was asked to decide and how it decided.
+It is read only: open a change request from it to approve or reject it there.
+
+- **Period**: pick the dates the CAB was asked between (UTC). With no dates it
+  shows the last four calendar months up to today; a period can cover at most
+  24 calendar months. **Last four months** goes back to that.
+- **Month**: the chips (All, then each month) narrow Overview, Registry,
+  Downtime & risk and Pushback to one month. The other tabs always show the
+  whole period (the Review queue shows what is waiting now).
+- **Overview**: tiles for the changes presented, approval rate, PROD changes,
+  outages declared, changes awaiting the CAB, standard and emergency changes,
+  each with a line by day. With a month picked, each tile compares it with the
+  month before. The current month is marked "so far" and is not compared until
+  it ends. Below: activity by day (switch the figure shown) and a card per month.
+- **Review queue**: the change requests whose CAB approval is open now, oldest
+  first, with who is asked.
+- **Trends**: by team, the split by change model, the weekly intake (by team or
+  by type), intake by customer and running totals.
+- **Registry**: every change request presented, with its outcome, who decided
+  and the latest CAB comment. Search, and filter by outcome, model, environment
+  and customer. It lists at most the newest 2,000.
+- **Downtime & risk**: the change requests that declare a service outage.
+- **Governance**: each CAB member's decisions, the top requesters, and the CAB
+  members.
+- **Pushback**: the CAB's rejections, and its comments on any decision, newest
+  first.
+- **Summary report**: the period's figures and a row per month. **Export as
+  PDF** saves it.
+
+What the figures mean: "presented" is when the CAB was asked (the day the
+change request's latest CAB approval stage was created; no CAB meeting is
+recorded), and a change request counts once, in that month. Teams stand in for
+streams: the assignment group is shown, as the delivery stream is not recorded.
+"Outage" means an outage was declared on the change request; whether it is full
+or partial is not recorded.
+
 ## Incidents
 
 The Incidents tab lists incidents with server-side search, pagination, and

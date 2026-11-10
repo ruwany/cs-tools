@@ -265,6 +265,31 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         icon: GitPullRequest,
       },
       {
+        // What the CAB was asked to decide, and how it decided
+        // (csm-operations/components/cab-dashboard). Its tabs (`?view=`) are
+        // places, not filters; the same values and labels as
+        // `CAB_DASHBOARD_VIEWS` (a test keeps them equal; this module stays
+        // free of feature imports).
+        id: "operations.cab-dashboard",
+        label: "CAB dashboard",
+        href: "/operations?tab=cab_dashboard",
+        tab: "cab_dashboard",
+        requires: "canUseOperations",
+        views: {
+          param: "view",
+          labels: {
+            queue: "CAB review queue",
+            trends: "CAB trends",
+            registry: "CAB registry",
+            downtime: "CAB downtime & risk",
+            governance: "CAB governance",
+            pushback: "CAB pushback",
+            summary: "CAB summary report",
+          },
+        },
+        icon: BarChart3,
+      },
+      {
         id: "operations.incidents",
         label: "Incidents",
         href: "/operations?tab=incidents",

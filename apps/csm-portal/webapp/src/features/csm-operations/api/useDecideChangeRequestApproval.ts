@@ -42,7 +42,8 @@ export interface DecideChangeRequestApprovalInput {
  * be decided. ServiceNow's existing business rule cascades the change
  * request's own state automatically, so on success both the approvals and
  * the change request detail are invalidated so the page reflects the new
- * state/stage immediately. A 409 ("this approval is no longer pending: the
+ * state/stage immediately (and the CAB dashboard's report, whose review queue
+ * and figures the decision changes). A 409 ("this approval is no longer pending: the
  * change request is in Closed, but the Review stage can only be decided while
  * it is in Review") means the change moved on while the page was open, so the
  * same queries are refreshed then too and the stale row disappears.
@@ -64,6 +65,10 @@ export function useDecideChangeRequestApproval(): UseMutationResult<
     });
     void queryClient.invalidateQueries({
       queryKey: [ApiQueryKeys.CHANGE_REQUESTS],
+    });
+    // The CAB dashboard's review queue and figures (every period cached).
+    void queryClient.invalidateQueries({
+      queryKey: [ApiQueryKeys.CAB_OPERATIONS_REPORT],
     });
   };
 

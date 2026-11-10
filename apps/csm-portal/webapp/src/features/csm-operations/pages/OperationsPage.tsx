@@ -24,6 +24,7 @@ import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import RunbooksTab from "@features/csm-operations/components/RunbooksTab";
+import CabOperationsDashboard from "@features/csm-operations/components/cab-dashboard/CabOperationsDashboard";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePathSectionTabs } from "@hooks/useSectionTabs";
 import { changeRequestsView } from "@features/csm-operations/utils/standardChanges";
@@ -52,6 +53,15 @@ const STANDARD_CHANGES_HEADING: PageHeading = {
 };
 
 /**
+ * The heading of the CAB dashboard: it is about the CAB's decisions on change
+ * requests, not about the other Operations entities.
+ */
+const CAB_DASHBOARD_HEADING: PageHeading = {
+  title: "CAB dashboard",
+  subtitle: "What the CAB was asked to decide, and how it decided.",
+};
+
+/**
  * Operations landing — the home for the managed-cloud operational entities,
  * split into Service Requests / Change Requests / Incidents / Problems tabs.
  * Service requests are case-typed, so they list through the shared issues view;
@@ -59,7 +69,9 @@ const STANDARD_CHANGES_HEADING: PageHeading = {
  * (templated change requests) are a sub-view of Change requests
  * (`ChangeRequestsArea`), not a tab of their own; there the page heading is
  * about standard changes (`STANDARD_CHANGES_HEADING`) instead of the
- * Operations-wide one, which names entities they have nothing to do with.
+ * Operations-wide one, which names entities they have nothing to do with. The
+ * CAB dashboard (`CabOperationsDashboard`) has its own heading for the same
+ * reason.
  *
  * Which tabs exist comes from the navigation tree, so a deployment can restrict
  * one through `CSM_PORTAL_FEATURE_OVERRIDES` without touching this page.
@@ -81,7 +93,12 @@ export default function OperationsPage(): JSX.Element {
   const backState = useLocation().state as { from?: string } | undefined;
   const [searchParams] = useSearchParams();
   const changeRequestsSubView = activeTab === "change-requests" ? changeRequestsView(searchParams) : "list";
-  const heading = changeRequestsSubView === "standard" ? STANDARD_CHANGES_HEADING : OPERATIONS_HEADING;
+  const heading =
+    activeTab === "cab-dashboard"
+      ? CAB_DASHBOARD_HEADING
+      : changeRequestsSubView === "standard"
+        ? STANDARD_CHANGES_HEADING
+        : OPERATIONS_HEADING;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -127,6 +144,8 @@ export default function OperationsPage(): JSX.Element {
       )}
 
       {activeTab === "change-requests" && <ChangeRequestsArea />}
+
+      {activeTab === "cab-dashboard" && <CabOperationsDashboard />}
 
       {activeTab === "incidents" && <IncidentsTab />}
 

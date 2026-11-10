@@ -121,6 +121,10 @@ describe("useDecideChangeRequestApproval", () => {
     expect(invalidateQueriesMock).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ["change-requests"] }),
     );
+    // The CAB dashboard's queue and figures change with the decision.
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ["cab-operations-report"] }),
+    );
   });
 
   it("also invalidates the approvals, detail, and list queries after an approval (an approval can move the CR on server-side, e.g. the CAB approval that schedules it)", async () => {
