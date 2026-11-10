@@ -42,6 +42,7 @@ import {
   cabMonthSelection,
   cabPeriodProblem,
   dayMediumLabel,
+  monthLabelSuffix,
   monthShortLabel,
 } from "@features/csm-operations/utils/cabOperations";
 import CabOverviewTab from "@features/csm-operations/components/cab-dashboard/CabOverviewTab";
@@ -184,7 +185,7 @@ export default function CabOperationsDashboard(): JSX.Element {
       >
         {[{ value: "all", label: "All" }, ...report.months.map((m) => ({
           value: m.month,
-          label: `${monthShortLabel(m.month)}${m.ongoing ? " (so far)" : ""}`,
+          label: `${monthShortLabel(m.month)}${monthLabelSuffix(m)}`,
         }))].map((chip) => {
           const selected = selection === chip.value;
           return (

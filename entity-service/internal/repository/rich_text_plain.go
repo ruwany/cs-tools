@@ -17,6 +17,7 @@
 package repository
 
 import (
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -41,7 +42,8 @@ var richTextBlockElements = map[string]bool{
 // was written (trimmed, and cut the same way).
 //
 // The result is for display as text (never as HTML): the CAB operations report
-// sends ServiceNow-copied approver comments and outage descriptions through it.
+// sends outage descriptions through it, and approver comments that hold markup
+// (ApproverCommentText).
 func RichTextPlainText(s string, maxRunes int) string {
 	doc, err := html.ParseWithOptions(strings.NewReader(s), html.ParseOptionEnableScripting(false))
 	if err != nil {
@@ -89,4 +91,29 @@ func cutRunes(s string, maxRunes int) string {
 	}
 	r := []rune(s)
 	return strings.TrimSpace(string(r[:maxRunes-1])) + "…"
+}
+
+// richTextMarkupTag matches an opening or closing tag of an element a rich-text
+// editor writes (ServiceNow's journal HTML, the app's own editor): p, div, br,
+// lists, tables, headings and the inline formatting ones.
+var richTextMarkupTag = regexp.MustCompile(
+	`(?i)</?(?:p|div|span|br|hr|ul|ol|li|table|thead|tbody|tr|td|th|b|i|u|s|strong|em|a|h[1-6]|pre|code|blockquote|font|img)(?:\s[^<>]*)?/?>`)
+
+// ApproverCommentText is an approval_stage_approver comment as its reader
+// should see it, "" when blank. The column holds two kinds of text: a comment
+// typed in this portal's decision dialog is plain text and is kept exactly as
+// typed (trimmed), so "Add the <env> name", "List<String>", a quoted "<script>"
+// or a literal "&lt;" survive; a comment copied from ServiceNow may be HTML, and
+// only a value holding an editor's markup (richTextMarkupTag) is read as rich
+// text (RichTextPlainText, blank by IsBlankRichText). A plain comment that
+// happens to contain such a tag ("drop the <b> from the title") is read as
+// markup: no column records which writer a comment came from.
+func ApproverCommentText(s string) string {
+	if richTextMarkupTag.MatchString(s) {
+		if IsBlankRichText(s) {
+			return ""
+		}
+		return RichTextPlainText(s, 0)
+	}
+	return strings.TrimSpace(s)
 }

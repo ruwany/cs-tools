@@ -8138,7 +8138,8 @@ paths:
         counts once, in the period of its latest CAB stage ("asked on": when the CAB was
         asked; no CAB meeting is recorded). Outage means an outage was declared on the
         change request (full vs partial is not recorded); teams are assignment groups
-        (no delivery stream is recorded). All dates are UTC.
+        (no delivery stream is recorded). The review queue is what waits for the CAB now,
+        whatever the period. All dates are UTC.
       operationId: getCABOperationsReport
       security:
         - bearerAuth: []
@@ -28187,7 +28188,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/CABOperationsCounts'
         - type: object
-          required: [month, ongoing, topTeams]
+          required: [month, ongoing, partial, topTeams]
           properties:
             month:
               type: string
@@ -28195,6 +28196,11 @@ components:
             ongoing:
               type: boolean
               description: The current month; its figures are so far only.
+            partial:
+              type: boolean
+              description: >-
+                The period does not cover the whole month (it starts after the month's first
+                day or ends before its last), so its figures are not a whole month's.
             topTeams:
               type: array
               description: The month's three busiest assignment groups.
@@ -28426,7 +28432,9 @@ components:
           items: {$ref: '#/components/schemas/CABOperationsRequester'}
         queue:
           type: array
-          description: Waiting for the CAB, oldest asked first.
+          description: >-
+            What waits for the CAB now, whatever the period: change requests in Authorize
+            whose latest CAB stage is undecided, oldest asked first.
           items: {$ref: '#/components/schemas/CABOperationsQueueItem'}
         registry:
           type: array

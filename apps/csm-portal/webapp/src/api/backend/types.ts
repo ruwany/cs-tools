@@ -3046,6 +3046,11 @@ export interface BeCABOperationsMonth extends BeCABOperationsCounts {
   month: string;
   /** The current month: its figures are so far only. */
   ongoing: boolean;
+  /**
+   * The period does not cover the whole month (it starts after the month's
+   * first day or ends before its last): its figures are not a whole month's.
+   */
+  partial: boolean;
   /** The month's three busiest assignment groups. */
   topTeams: BeCABOperationsNamedCount[];
 }

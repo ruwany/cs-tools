@@ -29,8 +29,10 @@ import (
 
 // The CAB operations report's read, against a real database. Skipped without
 // CHANGE_REQUEST_TEST_DSN, like the other change request integration tests.
-// Every row is dated March 2001 (one February 2001), far from any other test's
-// data, because the report reads the whole table by date.
+// Every row is dated March 2001 (a few in January and February 2001), far from
+// any other test's data, because the report reads the whole table by date. The
+// queue's read (every change in Authorize) is checked only for this test's
+// change requests, since other tests' data may be in Authorize too.
 //
 //	CHANGE_REQUEST_TEST_DSN=postgres://... go test ./internal/repository/ -run CABOperationsReportIntegration
 const (
@@ -51,6 +53,8 @@ const (
 	cabRptResubmitted = "3cab0000-0000-0000-0001-000000000006" // rejected in February, approved in March
 	cabRptPeerOnly    = "3cab0000-0000-0000-0001-000000000007" // no CAB stage
 	cabRptProposal    = "3cab0000-0000-0000-0001-000000000008" // a proposal's "CAB Approval" stage
+	cabRptOldPending  = "3cab0000-0000-0000-0001-000000000009" // in Authorize, CAB asked in January: queue only
+	cabRptAuthPeer    = "3cab0000-0000-0000-0001-00000000000a" // in Authorize with only a peer stage
 )
 
 func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
@@ -73,7 +77,7 @@ func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
 	}
 
 	workItems := []string{cabRptLabelled, cabRptUnlabelled, cabRptEmergency, cabRptCancelled, cabRptEarlier,
-		cabRptResubmitted, cabRptPeerOnly, cabRptProposal}
+		cabRptResubmitted, cabRptPeerOnly, cabRptProposal, cabRptOldPending, cabRptAuthPeer}
 	cleanup := func() {
 		_, _ = scoped.Exec(sys, `DELETE FROM work_item WHERE id = ANY($1::uuid[])`, workItems)
 		_, _ = scoped.Exec(sys, `DELETE FROM deployment WHERE id = ANY($1::uuid[])`, []string{cabRptProdDep, cabRptStagingDep})
@@ -161,8 +165,9 @@ func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
 	cr(cabRptEmergency, "CABRPT3", "AUTHORIZE", "EMERGENCY", nil, str("<p><br></p>"))
 	stage(cabRptEmergency, "2001-03-05T09:00:00Z", nil, cabGroup, [3]string{cabRptAlice, "REQUESTED", ""})
 
+	// A comment typed in the portal is plain text: kept exactly as typed.
 	cr(cabRptCancelled, "CABRPT4", "CANCELED", "NORMAL", nil, nil)
-	stage(cabRptCancelled, "2001-03-06T09:00:00Z", cabLabel, cabGroup, [3]string{cabRptAlice, "CANCELLED", ""})
+	stage(cabRptCancelled, "2001-03-06T09:00:00Z", cabLabel, cabGroup, [3]string{cabRptAlice, "CANCELLED", "Add the <env> name &lt;soon&gt;"})
 
 	cr(cabRptEarlier, "CABRPT5", "SCHEDULED", "NORMAL", nil, nil)
 	stage(cabRptEarlier, "2001-02-20T09:00:00Z", cabLabel, cabGroup, [3]string{cabRptAlice, "APPROVED", ""})
@@ -176,6 +181,13 @@ func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
 
 	cr(cabRptProposal, "CABRPT8", "", "", nil, nil)
 	stage(cabRptProposal, "2001-03-09T09:00:00Z", cabLabel, cabGroup, [3]string{cabRptAlice, "REQUESTED", ""})
+
+	cr(cabRptOldPending, "CABRPT9", "AUTHORIZE", "NORMAL", nil, nil)
+	stage(cabRptOldPending, "2001-01-10T09:00:00Z", peerLabel, nil, [3]string{cabRptBob, "APPROVED", ""})
+	stage(cabRptOldPending, "2001-01-11T09:00:00Z", cabLabel, cabGroup, [3]string{cabRptAlice, "REQUESTED", ""})
+
+	cr(cabRptAuthPeer, "CABRPT10", "AUTHORIZE", "NORMAL", nil, nil)
+	stage(cabRptAuthPeer, "2001-03-10T09:00:00Z", peerLabel, nil, [3]string{cabRptBob, "REQUESTED", ""})
 
 	repo := repository.NewCABOperationsReportRepository(scoped)
 	from, to := time.Date(2001, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2001, 4, 1, 0, 0, 0, 0, time.UTC)
@@ -192,7 +204,7 @@ func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
 			t.Errorf("change %s missing from the report", want)
 		}
 	}
-	for _, not := range []string{cabRptEarlier, cabRptPeerOnly, cabRptProposal} {
+	for _, not := range []string{cabRptEarlier, cabRptPeerOnly, cabRptProposal, cabRptOldPending, cabRptAuthPeer} {
 		if _, ok := byID[not]; ok {
 			t.Errorf("change %s must not be in the report", not)
 		}
@@ -226,9 +238,38 @@ func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
 		t.Errorf("emergency change %+v", e)
 	}
 
+	if c := byID[cabRptCancelled]; len(c.Stages) != 1 || c.Stages[0].Approvers[0].Comment != "Add the <env> name &lt;soon&gt;" {
+		t.Errorf("plain comment changed: %+v", c.Stages)
+	}
+
 	r := byID[cabRptResubmitted]
 	if len(r.Stages) != 2 || r.Stages[0].Approvers[0].Comment != "Too risky" || r.Stages[1].Approvers[0].State != "APPROVED" {
 		t.Errorf("resubmitted change %+v", r.Stages)
+	}
+
+	// The queue's read: every change in Authorize with a CAB stage, whatever the
+	// date.
+	open, err := repo.ListOpenCABChanges(sys)
+	if err != nil {
+		t.Fatalf("ListOpenCABChanges: %v", err)
+	}
+	openByID := map[string]repository.CABChangeRecord{}
+	for _, c := range open {
+		openByID[c.ID] = c
+	}
+	if o, ok := openByID[cabRptOldPending]; !ok {
+		t.Errorf("a change in Authorize asked before the period is missing from the queue's read")
+	} else if o.Number != "CABRPT9" || len(o.Stages) != 1 || !o.Stages[0].CreatedOn.Equal(time.Date(2001, 1, 11, 9, 0, 0, 0, time.UTC)) ||
+		len(o.Stages[0].Approvers) != 1 || o.Stages[0].Approvers[0].State != "REQUESTED" {
+		t.Errorf("old pending change %+v", o)
+	}
+	if _, ok := openByID[cabRptEmergency]; !ok {
+		t.Errorf("the emergency change in Authorize is missing from the queue's read")
+	}
+	for _, not := range []string{cabRptLabelled, cabRptUnlabelled, cabRptCancelled, cabRptPeerOnly, cabRptProposal, cabRptAuthPeer} {
+		if _, ok := openByID[not]; ok {
+			t.Errorf("change %s must not be in the queue's read", not)
+		}
 	}
 
 	members, err := repo.ListCABMembers(sys)

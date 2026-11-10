@@ -900,14 +900,19 @@ only at the entity service, `PermViewOperations` at the BFF).
   ("CAB pushback"); `cabOperations.test.ts` keeps them equal to `CAB_DASHBOARD_VIEWS`.
 - **What the month filter narrows**: Overview, Registry, Downtime & risk (by when the CAB was asked) and
   Pushback (by when the member decided). Trends, Governance and the Summary report are always the whole
-  period (the report has no team, customer or approver figures per month), and the Review queue is "now";
-  with a month picked those tabs say "The month filter does not apply to this tab."
+  period (the report has no team, customer or approver figures per month), and the Review queue is "now":
+  the backend builds `queue` from every change request in Authorize whatever `from` / `to` are, so its tab
+  count never hides a backlog. With a month picked those tabs say "The month filter does not apply to this
+  tab."
 - **KPI tiles and month-over-month** (`cabKpis` / `formatKpiDelta` in `utils/cabOperations.ts`): All shows
   the period's totals with no comparison. A month is compared with the month before when that month is in
-  the period and the picked one is complete: counts as a difference with its share ("+4 (+50%) vs Sep
+  the period and both are whole (`isWholeMonth`): counts as a difference with its share ("+4 (+50%) vs Sep
   2026", no share against 0), the approval rate in points ("+15 pts"). The **ongoing** month (the report's
   `currentMonth`, `ongoing: true`) gets a banner with its figures so far and is never compared, since a part
-  month against a whole one always reads as a fall. Sparklines are the selection's `daily` values (the
+  month against a whole one always reads as a fall. A **part** month (`partial: true`: the period starts
+  after its first day or ends before its last) is never compared either, on either side: the page says
+  which days are in the period, or that the month before is only partly in it. Chips and the summary's
+  rows say " (so far)" / " (part)" (`monthLabelSuffix`), the month card "So far" / "Part month". Sparklines are the selection's `daily` values (the
   rate per day, with gaps on days nothing was decided); "Awaiting the CAB" has none, as the report has no
   per-day open count.
 - **Charts**: `CabCharts.tsx` on `@wso2/oxygen-ui-charts-react` the way `DashboardLineChart` uses it (no
@@ -926,10 +931,12 @@ only at the entity service, `PermViewOperations` at the BFF).
   meeting is recorded), teams stand in for streams, an outage is "declared" (full vs partial is not
   recorded). Do not add a figure the report does not carry; extend the report instead
   (`entity-service/internal/domain/cab_operations_report.go`).
-- Tests: `utils/cabOperations.test.ts` (periods, MoM, sparklines, burn-up, weekly stacks, registry filters,
-  summary), `components/cab-dashboard/CabOperationsDashboard.test.tsx` (every tab from
-  `test/cabOperationsFixture.ts`, the month filter, the deltas, the ongoing month, loading / error / bad
-  period), `api/useGetCABOperationsReport.test.tsx`, `utils/cabOperationsReportPdf.test.ts`. User help:
+- **Registry paging**: the month chips and a new period change the rows without resetting the page, so
+  `CabRegistryTab` clamps the page once (`safePage`) and uses it for both the slice and `TablePagination`.
+- Tests: `utils/cabOperations.test.ts` (periods, MoM, part months, sparklines, burn-up, weekly stacks,
+  registry filters, summary), `components/cab-dashboard/CabOperationsDashboard.test.tsx` (every tab from
+  `test/cabOperationsFixture.ts`, the month filter, the deltas, the ongoing and part months, the registry
+  page after a month change, loading / error / bad period), `api/useGetCABOperationsReport.test.tsx`, `utils/cabOperationsReportPdf.test.ts`. User help:
   `features/help/content/operations.md`, "CAB dashboard".
 
 ## Change request lifecycle stepper

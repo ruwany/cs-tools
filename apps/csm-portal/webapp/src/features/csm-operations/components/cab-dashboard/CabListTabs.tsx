@@ -114,13 +114,13 @@ function EmptyLine({ children }: { children: string }): JSX.Element {
 
 // --- Review queue -----------------------------------------------------------------
 
-/** The change requests waiting for the CAB now, oldest asked first. Not narrowed by the month filter. */
+/** The change requests waiting for the CAB now, oldest asked first. Not narrowed by the period or the month filter. */
 export function CabQueueTab({ report }: { report: BeCABOperationsReport }): JSX.Element {
   const queue = report.queue;
   return (
     <CabCard
       title={`Awaiting the CAB (${queue.length})`}
-      caption="Change requests whose CAB approval is open now, oldest first. Open one to approve or reject it. The month filter does not apply here."
+      caption="Change requests whose CAB approval is open now, whenever the CAB was asked, oldest first. Open one to approve or reject it. The dates and the month filter do not apply here."
     >
       {queue.length === 0 ? (
         <EmptyLine>Nothing is waiting for the CAB.</EmptyLine>
@@ -231,7 +231,11 @@ export function CabRegistryTab({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(ROWS_PER_PAGE_OPTIONS[0]);
   const rows = filterCabRegistry(report.registry, selection, filters);
-  const pageRows = rows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  // The month chips and a new period change the rows without going through
+  // update(), so the page is clamped here, once, for both the slice and the
+  // pagination (a page past the end would show no rows beside "26-30 of 30").
+  const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / rowsPerPage) - 1));
+  const pageRows = rows.slice(safePage * rowsPerPage, safePage * rowsPerPage + rowsPerPage);
   const environments = registryOptions(report.registry, "environment");
   const customers = registryOptions(report.registry, "accountName");
   const hasNoEnvironment = report.registry.some((r) => r.environment === "");
@@ -343,7 +347,7 @@ export function CabRegistryTab({
         <TablePagination
           component="div"
           count={rows.length}
-          page={Math.min(page, Math.max(0, Math.ceil(rows.length / rowsPerPage) - 1))}
+          page={safePage}
           onPageChange={(_, next) => setPage(next)}
           rowsPerPage={rowsPerPage}
           onRowsPerPageChange={(e) => {

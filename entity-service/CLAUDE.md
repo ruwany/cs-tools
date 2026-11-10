@@ -8594,22 +8594,39 @@ than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
   change is in Authorize, else CANCELLED. `approvalRate` is approved / (approved + rejected), null when
   none was decided. The approver workload and `pushback` (rejections, and non-blank comments on any
   decision) cover every CAB stage, so a rejection before a resubmission is listed.
+- **The queue is not the period's**: `queue` is what waits for the CAB now. `ListOpenCABChanges` reads
+  every change request in Authorize with its CAB stages, whatever their date, and the service keeps
+  those whose latest CAB stage is undecided (PENDING by the rule above). A period in the past still
+  shows today's queue, and one asked before `from` is in it (queue-style figures stay current, as the
+  PLG dashboard's do). `months[].pending` / `totals.pending` stay the period's own counts.
+- **Months**: `ongoing` is the current month; `partial` is a month the period starts after the first
+  day of or ends before the last day of. The webapp compares neither, on either side.
 - `prod`: the change's own deployment or any linked one (`change_request_deployment`) is
   PRIMARY_PRODUCTION. `outageDeclared`: `service_outage_downtime` has visible text (`IsBlankRichText`).
-  Comments and the outage summary are plain text (`RichTextPlainText`, `repository/rich_text_plain.go`:
-  the same parse as `IsBlankRichText`, tags removed, never HTML). Teams are assignment groups (the
+  The outage summary is plain text (`RichTextPlainText`, `repository/rich_text_plain.go`: the same parse
+  as `IsBlankRichText`, tags removed, never HTML). Approver comments go through `ApproverCommentText`:
+  a comment typed in the portal's decision dialog is plain text and is kept as typed (trimmed: "Add the
+  <env> name", "List<String>", a literal "&lt;" survive); only a value holding an editor's markup
+  (`richTextMarkupTag`: p, div, br, lists, tables, headings, inline formatting tags, as ServiceNow's
+  journal HTML has) is read as rich text. No column says which writer a comment came from, so a plain
+  comment containing such a tag is read as markup. Teams are assignment groups (the
   database records no delivery stream). `registry` is capped at 2000 rows (`truncated`,
   `registryTotal`), `pushback` at 200 (`pushbackTotal`). `cabMembers` is the "CAB Approval" group
   resolved by `namedGroup`, active internal users only.
 - **Query**: stages are read by `approval_stage.created_on` in range (sargable), then the touched
-  changes' other stages, approvers and change rows by id. No index was added: on 80,000 stages the plan
+  changes' other stages, approvers and change rows by id. The queue's read starts from
+  `change_request.state = 'AUTHORIZE'` instead (no index on `state`: one scan of the table, and few
+  change requests are in Authorize at a time); both share `listCABChanges`. No index was added: on 80,000 stages the plan
   scans `approval_stage` twice and hash joins in about 40 ms (EXPLAIN ANALYZE, 2026-11-10).
 - Tests: `TestBuildCABOperationsReport` (bucketing, rates, outcomes, weeks, teams, pushback),
-  `TestBuildCABOperationsReport_Caps`, `TestCABStageDecision`, `TestCABReportPeriod` (service),
-  `TestCABOperationsReportHandler`, `TestRichTextPlainText`, `TestIsCABStageForReport`,
+  `TestBuildCABOperationsReport_Caps`, `TestBuildCABOperationsReport_PartialMonths`, `TestCABStageDecision`,
+  `TestCABReportPeriod`, `TestCABOperationsReportService_ExclusiveEnd` (a change waiting since before the
+  period is queued) (service), `TestCABOperationsReportHandler`, `TestRichTextPlainText`,
+  `TestApproverCommentText`, `TestIsCABStageForReport`,
   `TestCABOperationsReportIntegration_ListCABChanges` (labelled and ServiceNow-style unlabelled CAB
-  stages, approved / rejected / pending / cancelled, a resubmission, a proposal's stage; skipped
-  without `CHANGE_REQUEST_TEST_DSN`).
+  stages, approved / rejected / pending / cancelled, a resubmission, a proposal's stage, a plain comment
+  kept as typed, and the queue's read: a change in Authorize asked before the period; skipped without
+  `CHANGE_REQUEST_TEST_DSN`).
 
 ## Standard changes: templates, proposals and the CAB
 

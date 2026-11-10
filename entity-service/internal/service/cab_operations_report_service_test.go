@@ -95,7 +95,14 @@ func cabFixture() []repository.CABChangeRecord {
 func TestBuildCABOperationsReport(t *testing.T) {
 	from, to, now := cabT("2026-10-01T00:00:00Z"), cabT("2026-11-10T00:00:00Z"), cabT("2026-11-10T08:30:00Z")
 	members := []domain.CABOperationsMember{{UserID: "alice", Name: "Alice", Email: "alice@wso2.com"}}
-	r := buildCABOperationsReport(cabFixture(), members, from, to, now)
+	changes := cabFixture()
+	// The queue's read: C (in the period), F (asked in June, before the period,
+	// still waiting) and G (in Authorize, but its CAB stage is approved).
+	f := cabChange("f", "AUTHORIZE", "NORMAL", "", "1", "2026-06-20T09:00:00Z",
+		cabApprover("bob", "Bob", "REQUESTED", "2026-06-20T09:00:00Z", ""))
+	g := cabChange("g", "AUTHORIZE", "NORMAL", "", "1", "2026-06-21T09:00:00Z",
+		cabApprover("bob", "Bob", "APPROVED", "2026-06-22T09:00:00Z", ""))
+	r := buildCABOperationsReport(changes, []repository.CABChangeRecord{changes[2], g, f}, members, from, to, now)
 
 	if r.From != "2026-10-01" || r.To != "2026-11-10" || r.CurrentMonth != "2026-11" || r.GeneratedOn != "2026-11-10T08:30:00Z" {
 		t.Fatalf("header %s %s %s %s", r.From, r.To, r.CurrentMonth, r.GeneratedOn)
@@ -121,11 +128,11 @@ func TestBuildCABOperationsReport(t *testing.T) {
 		t.Fatalf("months %+v", r.Months)
 	}
 	oct, nov := r.Months[0], r.Months[1]
-	if oct.Month != "2026-10" || oct.Ongoing || oct.Total != 2 || oct.Approved != 1 || oct.Rejected != 1 || oct.Prod != 1 {
+	if oct.Month != "2026-10" || oct.Ongoing || oct.Partial || oct.Total != 2 || oct.Approved != 1 || oct.Rejected != 1 || oct.Prod != 1 {
 		t.Errorf("october %+v", oct)
 	}
 	rateIs(t, "october", oct.ApprovalRate, 0.5)
-	if nov.Month != "2026-11" || !nov.Ongoing || nov.Total != 3 || nov.Pending != 1 || nov.Cancelled != 1 || nov.Approved != 1 {
+	if nov.Month != "2026-11" || !nov.Ongoing || !nov.Partial || nov.Total != 3 || nov.Pending != 1 || nov.Cancelled != 1 || nov.Approved != 1 {
 		t.Errorf("november %+v", nov)
 	}
 	rateIs(t, "november", nov.ApprovalRate, 1)
@@ -211,8 +218,12 @@ func TestBuildCABOperationsReport(t *testing.T) {
 		t.Errorf("requesters %+v", r.Requesters)
 	}
 
-	// Queue: only C, with the members still asked.
-	if len(r.Queue) != 1 || r.Queue[0].ID != "c" || len(r.Queue[0].Approvers) != 2 || r.Queue[0].Environment != "PRIMARY_PRODUCTION" {
+	// Queue: what waits now, whatever the period: F (asked before the period)
+	// then C, with the members still asked; G's CAB stage is decided. F is not
+	// counted in the period's figures.
+	if len(r.Queue) != 2 || r.Queue[0].ID != "f" || r.Queue[0].AskedOn != "2026-06-20T09:00:00Z" || r.Queue[0].Model != "normal" ||
+		len(r.Queue[0].Approvers) != 1 || r.Queue[0].Approvers[0] != "Bob" ||
+		r.Queue[1].ID != "c" || len(r.Queue[1].Approvers) != 2 || r.Queue[1].Environment != "PRIMARY_PRODUCTION" {
 		t.Errorf("queue %+v", r.Queue)
 	}
 
@@ -263,8 +274,8 @@ func TestBuildCABOperationsReport(t *testing.T) {
 // TestBuildCABOperationsReport_Empty: no change requests still lists the
 // calendar, with no rates and empty (never null) lists.
 func TestBuildCABOperationsReport_Empty(t *testing.T) {
-	r := buildCABOperationsReport(nil, nil, cabT("2026-09-01T00:00:00Z"), cabT("2026-09-30T00:00:00Z"), cabT("2026-11-10T00:00:00Z"))
-	if len(r.Months) != 1 || r.Months[0].Ongoing || r.Months[0].ApprovalRate != nil || len(r.Daily) != 30 {
+	r := buildCABOperationsReport(nil, nil, nil, cabT("2026-09-01T00:00:00Z"), cabT("2026-09-30T00:00:00Z"), cabT("2026-11-10T00:00:00Z"))
+	if len(r.Months) != 1 || r.Months[0].Ongoing || r.Months[0].Partial || r.Months[0].ApprovalRate != nil || len(r.Daily) != 30 {
 		t.Errorf("calendar %+v / %d days", r.Months, len(r.Daily))
 	}
 	if r.Totals.ApprovalRate != nil || r.Registry == nil || r.Queue == nil || r.Pushback == nil || r.CABMembers == nil ||
@@ -283,7 +294,7 @@ func TestBuildCABOperationsReport_Caps(t *testing.T) {
 		changes = append(changes, cabChange(fmt.Sprintf("x%05d", i), "CANCELED", "NORMAL", "", "1", asked,
 			cabApprover("bob", "Bob", "REJECTED", asked, "")))
 	}
-	r := buildCABOperationsReport(changes, nil, cabT("2026-10-01T00:00:00Z"), cabT("2026-10-31T00:00:00Z"), cabT("2026-11-10T00:00:00Z"))
+	r := buildCABOperationsReport(changes, nil, nil, cabT("2026-10-01T00:00:00Z"), cabT("2026-10-31T00:00:00Z"), cabT("2026-11-10T00:00:00Z"))
 	if len(r.Registry) != domain.CABOperationsRegistryCap || r.RegistryTotal != n || !r.Truncated {
 		t.Errorf("registry %d / %d truncated %v", len(r.Registry), r.RegistryTotal, r.Truncated)
 	}
@@ -295,6 +306,24 @@ func TestBuildCABOperationsReport_Caps(t *testing.T) {
 	}
 	if r.Totals.Rejected != n {
 		t.Errorf("totals count every change: %d", r.Totals.Rejected)
+	}
+}
+
+// TestBuildCABOperationsReport_PartialMonths: a month the period cuts short at
+// either end is partial; a month it covers whole is not.
+func TestBuildCABOperationsReport_PartialMonths(t *testing.T) {
+	r := buildCABOperationsReport(nil, nil, nil, cabT("2026-07-20T00:00:00Z"), cabT("2026-09-10T00:00:00Z"), cabT("2026-11-10T00:00:00Z"))
+	got := ""
+	for _, m := range r.Months {
+		got += fmt.Sprintf("%s:%v ", m.Month, m.Partial)
+	}
+	if got != "2026-07:true 2026-08:false 2026-09:true " {
+		t.Errorf("partial months %q", got)
+	}
+	// Whole months, February of a leap year included.
+	r = buildCABOperationsReport(nil, nil, nil, cabT("2028-02-01T00:00:00Z"), cabT("2028-02-29T00:00:00Z"), cabT("2028-05-10T00:00:00Z"))
+	if len(r.Months) != 1 || r.Months[0].Partial {
+		t.Errorf("whole February %+v", r.Months)
 	}
 }
 
@@ -347,6 +376,11 @@ func TestCABReportPeriod(t *testing.T) {
 
 type stubCABRepo struct {
 	from, to time.Time
+	open     []repository.CABChangeRecord
+}
+
+func (s *stubCABRepo) ListOpenCABChanges(context.Context) ([]repository.CABChangeRecord, error) {
+	return s.open, nil
 }
 
 func (s *stubCABRepo) ListCABChanges(_ context.Context, from, to time.Time) ([]repository.CABChangeRecord, error) {
@@ -360,7 +394,9 @@ func (s *stubCABRepo) ListCABMembers(context.Context) ([]domain.CABOperationsMem
 
 // TestCABOperationsReportService_ExclusiveEnd: the repository gets [from, to+1 day).
 func TestCABOperationsReportService_ExclusiveEnd(t *testing.T) {
-	repo := &stubCABRepo{}
+	// A change waiting since May is in the queue of an October report.
+	repo := &stubCABRepo{open: []repository.CABChangeRecord{cabChange("old", "AUTHORIZE", "NORMAL", "", "", "2026-05-04T09:00:00Z",
+		cabApprover("bob", "Bob", "REQUESTED", "2026-05-04T09:00:00Z", ""))}}
 	svc := &cabOperationsReportService{repo: repo, now: func() time.Time { return cabT("2026-11-10T08:00:00Z") }}
 	r, err := svc.BuildReport(context.Background(), domain.CABOperationsReportRequest{From: "2026-10-01", To: "2026-10-31"})
 	if err != nil {
@@ -371,5 +407,8 @@ func TestCABOperationsReportService_ExclusiveEnd(t *testing.T) {
 	}
 	if len(r.Months) != 1 || r.Months[0].Ongoing {
 		t.Errorf("months %+v", r.Months)
+	}
+	if len(r.Queue) != 1 || r.Queue[0].ID != "old" || r.Totals.Total != 0 {
+		t.Errorf("queue %+v, totals %+v", r.Queue, r.Totals)
 	}
 }

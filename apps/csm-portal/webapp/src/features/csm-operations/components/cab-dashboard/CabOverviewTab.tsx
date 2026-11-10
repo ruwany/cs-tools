@@ -98,6 +98,7 @@ function MonthCard({ month }: { month: BeCABOperationsMonth }): JSX.Element {
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, mb: 1 }}>
           <Typography variant="h6">{monthLongLabel(month.month)}</Typography>
           {month.ongoing && <Chip size="small" variant="outlined" color="info" label="So far" />}
+          {!month.ongoing && month.partial && <Chip size="small" variant="outlined" color="info" label="Part month" />}
         </Box>
         <Box component="dl" sx={{ m: 0, display: "grid", gridTemplateColumns: "1fr auto", rowGap: 0.5, columnGap: 2 }}>
           {rows.map(([label, value]) => (
@@ -144,7 +145,7 @@ export default function CabOverviewTab({
   const theme = useTheme();
   const colors = useKpiColors();
   const [metric, setMetric] = useState<CabDailyMetric>("total");
-  const { kpis, comparedWith, ongoing } = cabKpis(report, selection);
+  const { kpis, comparedWith, ongoing, partial, partialBefore } = cabKpis(report, selection);
   const days = daysOf(report, selection);
   const metricLabel = CAB_DAILY_METRICS.find((m) => m.value === metric)?.label ?? "";
   const months = selection === "all" ? report.months : report.months.filter((m) => m.month === selection);
@@ -152,6 +153,10 @@ export default function CabOverviewTab({
   let comparison: string;
   if (selection === "all") comparison = "The whole period. Pick a month to compare it with the month before.";
   else if (ongoing) comparison = `${monthLongLabel(selection)} so far.`;
+  else if (partial && days.length > 0)
+    comparison = `${monthLongLabel(selection)}: only ${dayShortLabel(days[0].day)} to ${dayShortLabel(days[days.length - 1].day)} is in the period, so it is not compared with the month before.`;
+  else if (partialBefore)
+    comparison = `${monthLongLabel(selection)}. Only part of ${monthLongLabel(partialBefore.month)} is in the period, so there is no comparison.`;
   else if (comparedWith) comparison = `${monthLongLabel(selection)}, compared with ${monthLongLabel(comparedWith)}.`;
   else comparison = `${monthLongLabel(selection)}. The month before is outside the period, so there is no comparison.`;
 

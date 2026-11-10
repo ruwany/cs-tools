@@ -35,6 +35,11 @@ type CABOperationsReportRepository interface {
 	// approvers. Which stage is the CAB's is decided exactly as the change
 	// request's approvals list shows it (isCABStageForReport).
 	ListCABChanges(ctx context.Context, from, to time.Time) ([]CABChangeRecord, error)
+	// ListOpenCABChanges returns every change request in Authorize that has a
+	// CAB stage, whenever that stage was created, in the same shape: the review
+	// queue is what waits for the CAB now, so no period bounds it. The caller
+	// keeps the ones whose latest CAB stage is still undecided.
+	ListOpenCABChanges(ctx context.Context) ([]CABChangeRecord, error)
 	// ListCABMembers returns the members of the "CAB Approval" group who may
 	// decide a CAB stage (active internal users), resolved the way the approval
 	// flow resolves the group (namedGroup), sorted by name.
@@ -87,7 +92,8 @@ type CABApproverRecord struct {
 	CreatedOn time.Time
 	// UpdatedOn is when the row last changed: the decision time once decided.
 	UpdatedOn time.Time
-	// Comment is the row's comment as plain text, "" when blank.
+	// Comment is the row's comment as plain text (ApproverCommentText: as typed
+	// in the portal, markup removed from a ServiceNow one), "" when blank.
 	Comment string
 }
 
@@ -131,7 +137,22 @@ WITH touched AS (
   SELECT DISTINCT s.work_item_id
   FROM approval_stage s
   WHERE s.created_on >= $1 AND s.created_on < $2
-)
+)` + cabReportStagesOfTouchedSQL
+
+// cabReportOpenStagesSQL lists every stage of every change request in
+// Authorize (the review queue's candidates), with the same columns. There is
+// no index on change_request.state: the table is scanned once, and the
+// change requests in Authorize at any time are a handful.
+const cabReportOpenStagesSQL = `
+WITH touched AS (
+  SELECT cr.id AS work_item_id
+  FROM change_request cr
+  WHERE cr.state = 'AUTHORIZE'::change_request_state_enum
+)` + cabReportStagesOfTouchedSQL
+
+// cabReportStagesOfTouchedSQL reads the stages of the change requests in a
+// "touched" CTE.
+const cabReportStagesOfTouchedSQL = `
 SELECT s.id::text, s.work_item_id::text, s.created_on, s.checkpoint_label, g.name,
        COALESCE(cr.change_model::text, ''),
        (row_number() OVER (PARTITION BY s.work_item_id ORDER BY s.created_on, s.id) - 1)::int
@@ -189,6 +210,23 @@ const cabOutageSummaryRunes = 300
 //
 // crvis: internal callers only: GET /reports/cab-operations is wrapped by internalOnly (server/routes.go) and the service checks RequireInternalCaller again, so no customer identity reaches it
 func (r *cabOperationsReportRepository) ListCABChanges(ctx context.Context, from, to time.Time) ([]CABChangeRecord, error) {
+	// A change counts in the period of its latest CAB stage only.
+	return r.listCABChanges(ctx, func(latest time.Time) bool {
+		return !latest.Before(from) && latest.Before(to)
+	}, cabReportStagesSQL, from, to)
+}
+
+// ListOpenCABChanges implements CABOperationsReportRepository.
+//
+// crvis: internal callers only, as ListCABChanges
+func (r *cabOperationsReportRepository) ListOpenCABChanges(ctx context.Context) ([]CABChangeRecord, error) {
+	return r.listCABChanges(ctx, func(time.Time) bool { return true }, cabReportOpenStagesSQL)
+}
+
+// listCABChanges runs stagesSQL (columns of cabReportStagesOfTouchedSQL), keeps
+// the change requests that have a CAB stage and whose latest CAB stage's
+// created_on passes keep, and reads their approvers and change rows.
+func (r *cabOperationsReportRepository) listCABChanges(ctx context.Context, keep func(latest time.Time) bool, stagesSQL string, args ...any) ([]CABChangeRecord, error) {
 	type stageRow struct {
 		id, workItemID string
 		createdOn      time.Time
@@ -196,7 +234,7 @@ func (r *cabOperationsReportRepository) ListCABChanges(ctx context.Context, from
 		model          string
 		position       int
 	}
-	rows, err := r.db.Query(ctx, cabReportStagesSQL, from, to)
+	rows, err := r.db.Query(ctx, stagesSQL, args...)
 	if err != nil {
 		return nil, fmt.Errorf("cab operations report: list stages: %w", err)
 	}
@@ -216,13 +254,11 @@ func (r *cabOperationsReportRepository) ListCABChanges(ctx context.Context, from
 		return nil, fmt.Errorf("cab operations report: list stages: %w", err)
 	}
 
-	// A change counts in the period of its latest CAB stage only.
 	var changeIDs, stageIDs []string
 	stagesByChange := map[string][]CABStageRecord{}
 	for id, stages := range cabStages {
 		sort.Slice(stages, func(i, j int) bool { return stages[i].position < stages[j].position })
-		latest := stages[len(stages)-1]
-		if latest.createdOn.Before(from) || !latest.createdOn.Before(to) {
+		if !keep(stages[len(stages)-1].createdOn) {
 			continue
 		}
 		changeIDs = append(changeIDs, id)
@@ -248,9 +284,7 @@ func (r *cabOperationsReportRepository) ListCABChanges(ctx context.Context, from
 			return nil, fmt.Errorf("cab operations report: scan approver: %w", err)
 		}
 		a.State = normalizeChangeRequestApprovalStatus(&state)
-		if !IsBlankRichText(comment) {
-			a.Comment = RichTextPlainText(comment, 0)
-		}
+		a.Comment = ApproverCommentText(comment)
 		approversByStage[stageID] = append(approversByStage[stageID], a)
 	}
 	rows.Close()

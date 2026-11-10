@@ -42,6 +42,27 @@ func TestRichTextPlainText(t *testing.T) {
 	}
 }
 
+// TestApproverCommentText: a plain comment (typed in the portal) is kept as
+// typed; only one holding an editor's markup is read as rich text.
+func TestApproverCommentText(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"  Add the <env> name to step 3 ", "Add the <env> name to step 3"},
+		{"Check List<String> handling", "Check List<String> handling"},
+		{"Do not use <script> here.\nSee the runbook.", "Do not use <script> here.\nSee the runbook."},
+		{"Type &lt; literally", "Type &lt; literally"},
+		{"   ", ""},
+		{"", ""},
+		{"<p>Add the <b>rollback</b> steps.</p>", "Add the rollback steps."},
+		{"No <B>rollback</B> plan&nbsp;", "No rollback plan"},
+		{"first line<br/>second", "first line\nsecond"},
+		{"<p><br></p>", ""},
+	} {
+		if got := ApproverCommentText(tc.in); got != tc.want {
+			t.Errorf("ApproverCommentText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestIsCABStageForReport pins the report's CAB-stage rule to the one the
 // approvals list uses (changeRequestApprovalStageLabel + classifyApprovalStage).
 func TestIsCABStageForReport(t *testing.T) {

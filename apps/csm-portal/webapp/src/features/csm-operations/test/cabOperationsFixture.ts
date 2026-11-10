@@ -53,11 +53,13 @@ function counts(
   };
 }
 
+/** A month of the fixture; the ongoing one is also partial, as the period ends on its 10th. */
 function month(key: string, c: BeCABOperationsCounts, ongoing = false): BeCABOperationsMonth {
   return {
     month: key,
     ...c,
     ongoing,
+    partial: ongoing,
     topTeams: [
       { id: "g-apollo", name: "Apollo team", count: Math.ceil(c.total / 2) },
       { id: "g-artemis", name: "Artemis team", count: Math.floor(c.total / 2) },

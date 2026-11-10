@@ -13405,8 +13405,11 @@ paths:
         approval approves it; undecided, it is PENDING while the change waits in
         authorize and CANCELLED otherwise. The approver workload and the pushback cover
         every CAB stage of each change request, so a rejection before a resubmission is
-        listed. Comments are plain text. Postgres data sources only (not registered with
-        DATA_SOURCE=servicenow).
+        listed. The queue is the exception to the period: it is what waits for the CAB now
+        (every change request in Authorize whose latest CAB stage is undecided), so
+        narrowing the dates cannot hide a backlog. Comments are plain text: one typed in
+        the portal as typed, a ServiceNow one with its markup removed. Postgres data
+        sources only (not registered with DATA_SOURCE=servicenow).
       operationId: getCABOperationsReport
       parameters:
         - name: from
@@ -28812,7 +28815,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/CABOperationsCounts'
         - type: object
-          required: [month, ongoing, topTeams]
+          required: [month, ongoing, partial, topTeams]
           properties:
             month:
               type: string
@@ -28820,6 +28823,11 @@ components:
             ongoing:
               type: boolean
               description: The current month; its figures are so far only.
+            partial:
+              type: boolean
+              description: >-
+                The period does not cover the whole month (it starts after the month's first
+                day or ends before its last), so its figures are not a whole month's.
             topTeams:
               type: array
               description: The month's three busiest assignment groups.
@@ -29051,7 +29059,9 @@ components:
           items: {$ref: '#/components/schemas/CABOperationsRequester'}
         queue:
           type: array
-          description: Waiting for the CAB, oldest asked first.
+          description: >-
+            What waits for the CAB now, whatever the period: change requests in Authorize
+            whose latest CAB stage is undecided, oldest asked first.
           items: {$ref: '#/components/schemas/CABOperationsQueueItem'}
         registry:
           type: array

@@ -181,6 +181,17 @@ export function inMonth(value: string | null | undefined, selection: CabMonthSel
   return !!value && value.slice(0, 7) === selection;
 }
 
+/** True when a month's figures are a whole month's: neither ongoing nor cut short by the period. */
+export function isWholeMonth(month: BeCABOperationsMonth): boolean {
+  return !month.ongoing && !month.partial;
+}
+
+/** What a month's label adds: " (so far)" for the ongoing month, " (part)" for one the period cuts short. */
+export function monthLabelSuffix(month: BeCABOperationsMonth): string {
+  if (month.ongoing) return " (so far)";
+  return month.partial ? " (part)" : "";
+}
+
 /** The days of the selection (the whole period for "all"). */
 export function daysOf(report: BeCABOperationsReport, selection: CabMonthSelection): BeCABOperationsDay[] {
   return selection === "all" ? report.daily : report.daily.filter((d) => d.day.slice(0, 7) === selection);
@@ -200,7 +211,8 @@ export interface CabKpi {
   /**
    * The change from the month before: a count difference, or percentage
    * points for the rate. Null when there is no comparison: "all", the first
-   * month of the period, an ongoing month, or a rate missing on either side.
+   * month of the period, an ongoing or part month on either side, or a rate
+   * missing on either side.
    */
   delta: number | null;
   /** The month before's value, when compared. */
@@ -215,6 +227,10 @@ export interface CabKpiSet {
   comparedWith: string | null;
   /** The selected month when it is the ongoing one (its figures are so far only, and it is not compared). */
   ongoing: BeCABOperationsMonth | null;
+  /** The selected month when the period cuts it short and it is not the ongoing one (not compared). */
+  partial: BeCABOperationsMonth | null;
+  /** The month before the selected one when it is in the period but not whole (so there is no comparison). */
+  partialBefore: BeCABOperationsMonth | null;
 }
 
 const KPI_DEFS: ReadonlyArray<{ key: CabKpiKey; label: string }> = [
@@ -259,18 +275,22 @@ function kpiSparkline(days: BeCABOperationsDay[], key: CabKpiKey): Array<number 
 
 /**
  * The KPI tiles for a selection. "all" shows the period's totals with no
- * comparison. A month is compared with the month before it when that month is
- * in the period and the selected month is complete: the ongoing month (the
- * report's `currentMonth`) is shown as it stands but left out of the
- * month-over-month comparison, as a part month against a whole one would
- * always read as a fall.
+ * comparison. A month is compared with the month before it only when both are
+ * in the period and both are whole: the ongoing month (the report's
+ * `currentMonth`) and a month the period starts or ends inside (`partial`) are
+ * shown as they stand but left out of the month-over-month comparison, on
+ * either side, as a part month against a whole one would read as a fall (or,
+ * as the base, a rise).
  */
 export function cabKpis(report: BeCABOperationsReport, selection: CabMonthSelection): CabKpiSet {
   const index = selection === "all" ? -1 : report.months.findIndex((m) => m.month === selection);
   const month = index >= 0 ? report.months[index] : undefined;
   const current: BeCABOperationsCounts = month ?? report.totals;
   const ongoing = month?.ongoing ? month : null;
-  const before = month && !month.ongoing && index > 0 ? report.months[index - 1] : undefined;
+  const partial = month && !month.ongoing && month.partial ? month : null;
+  const previousMonth = index > 0 ? report.months[index - 1] : undefined;
+  const partialBefore = month && isWholeMonth(month) && previousMonth && !isWholeMonth(previousMonth) ? previousMonth : null;
+  const before = month && isWholeMonth(month) && previousMonth && isWholeMonth(previousMonth) ? previousMonth : undefined;
   const days = daysOf(report, month ? month.month : "all");
 
   const kpis = KPI_DEFS.map(({ key, label }): CabKpi => {
@@ -283,7 +303,7 @@ export function cabKpis(report: BeCABOperationsReport, selection: CabMonthSelect
     }
     return { key, label, value, isRate, delta, previous, sparkline: kpiSparkline(days, key) };
   });
-  return { kpis, comparedWith: before ? before.month : null, ongoing };
+  return { kpis, comparedWith: before ? before.month : null, ongoing, partial, partialBefore };
 }
 
 /**
@@ -458,7 +478,7 @@ export interface CabSummary {
   generatedOn: string;
   /** The period's headline figures, in order. */
   totals: Array<{ label: string; value: string }>;
-  /** The per-month table's header and rows (an ongoing month says "so far"). */
+  /** The per-month table's header and rows (an ongoing month says "so far", a part month "part"). */
   monthHeader: string[];
   monthRows: string[][];
 }
@@ -489,7 +509,7 @@ export function cabSummary(report: BeCABOperationsReport): CabSummary {
     ],
     monthHeader: ["Month", "Presented", "Approved", "Rejected", "Awaiting", "Approval rate", "PROD", "Outages", "Standard", "Emergency"],
     monthRows: report.months.map((m) => [
-      `${monthShortLabel(m.month)}${m.ongoing ? " (so far)" : ""}`,
+      `${monthShortLabel(m.month)}${monthLabelSuffix(m)}`,
       String(m.total),
       String(m.approved),
       String(m.rejected),

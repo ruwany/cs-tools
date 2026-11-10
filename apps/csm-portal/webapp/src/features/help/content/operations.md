@@ -303,14 +303,16 @@ It is read only: open a change request from it to approve or reject it there.
   24 calendar months. **Last four months** goes back to that.
 - **Month**: the chips (All, then each month) narrow Overview, Registry,
   Downtime & risk and Pushback to one month. The other tabs always show the
-  whole period (the Review queue shows what is waiting now).
+  whole period. The Review queue always shows what is waiting now, whatever the
+  dates.
 - **Overview**: tiles for the changes presented, approval rate, PROD changes,
   outages declared, changes awaiting the CAB, standard and emergency changes,
   each with a line by day. With a month picked, each tile compares it with the
   month before. The current month is marked "so far" and is not compared until
-  it ends. Below: activity by day (switch the figure shown) and a card per month.
-- **Review queue**: the change requests whose CAB approval is open now, oldest
-  first, with who is asked.
+  it ends. A month the dates start or end inside is marked "part" and is not
+  compared either, nor used as the month before. Below: activity by day (switch the figure shown) and a card per month.
+- **Review queue**: the change requests whose CAB approval is open now, however
+  long ago the CAB was asked, oldest first, with who is asked.
 - **Trends**: by team, the split by change model, the weekly intake (by team or
   by type), intake by customer and running totals.
 - **Registry**: every change request presented, with its outcome, who decided

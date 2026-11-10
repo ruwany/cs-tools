@@ -120,6 +120,10 @@ type CABOperationsMonth struct {
 	CABOperationsCounts
 	// Ongoing is true for the current month: its figures are so far only.
 	Ongoing bool `json:"ongoing"`
+	// Partial is true when the period does not cover the whole month (it starts
+	// after the month's first day or ends before its last): its figures are not
+	// a whole month's, so it is not compared with another month.
+	Partial bool `json:"partial"`
 	// TopTeams is the month's three busiest assignment groups.
 	TopTeams []CABOperationsNamedCount `json:"topTeams"`
 }
@@ -204,7 +208,9 @@ type CABOperationsRequester struct {
 	Total  int    `json:"total"`
 }
 
-// CABOperationsQueueItem is a change request waiting for the CAB.
+// CABOperationsQueueItem is a change request waiting for the CAB now: in
+// Authorize, its latest CAB stage undecided, whenever the CAB was asked (the
+// queue is not bounded by the report's period).
 type CABOperationsQueueItem struct {
 	ID          string `json:"id"`
 	Number      string `json:"number"`
@@ -292,7 +298,8 @@ type CABOperationsReport struct {
 	Approvers []CABOperationsApprover `json:"approvers"`
 	// Requesters is the ten who raised the most.
 	Requesters []CABOperationsRequester `json:"requesters"`
-	// Queue is oldest asked first.
+	// Queue is what waits for the CAB now, whatever the period, oldest asked
+	// first.
 	Queue []CABOperationsQueueItem `json:"queue"`
 	// Registry is newest asked first, at most CABOperationsRegistryCap rows;
 	// RegistryTotal is the full count and Truncated says rows were left out.

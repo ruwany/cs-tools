@@ -33,6 +33,8 @@ import {
   filterCabRegistry,
   formatKpiDelta,
   formatRate,
+  isWholeMonth,
+  monthLabelSuffix,
   monthLongLabel,
   monthShortLabel,
   registryOptions,
@@ -139,6 +141,37 @@ describe("cabKpis", () => {
     expect(all.comparedWith).toBeNull();
     expect(all.kpis.find((k) => k.key === "total")?.value).toBe(33);
     expect(formatKpiDelta(all.kpis[0], all.comparedWith)).toBeNull();
+  });
+
+  it("does not compare a month the period cuts short, nor use one as the base", () => {
+    // The period starts on Aug 20 and ends on Oct 10: August and October are part months.
+    const cut = cabReportFixture();
+    cut.from = "2026-08-20";
+    cut.to = "2026-10-10";
+    cut.months = cut.months
+      .filter((m) => m.month !== "2026-11")
+      .map((m) => ({ ...m, partial: m.month === "2026-08" || m.month === "2026-10" }));
+
+    const october = cabKpis(cut, "2026-10");
+    expect(october.partial?.month).toBe("2026-10");
+    expect(october.ongoing).toBeNull();
+    expect(october.comparedWith).toBeNull();
+    expect(october.kpis.every((k) => k.delta === null)).toBe(true);
+
+    const september = cabKpis(cut, "2026-09");
+    expect(september.partial).toBeNull();
+    expect(september.partialBefore?.month).toBe("2026-08");
+    expect(september.comparedWith).toBeNull();
+    expect(september.kpis.every((k) => k.delta === null)).toBe(true);
+  });
+
+  it("labels the ongoing month and a part month", () => {
+    const [aug, , , nov] = report.months;
+    expect(monthLabelSuffix(nov)).toBe(" (so far)");
+    expect(monthLabelSuffix(aug)).toBe("");
+    expect(monthLabelSuffix({ ...aug, partial: true })).toBe(" (part)");
+    expect(isWholeMonth(aug)).toBe(true);
+    expect(isWholeMonth(nov)).toBe(false);
   });
 
   it("draws each sparkline over the selection's days, the rate with gaps, and none for pending", () => {

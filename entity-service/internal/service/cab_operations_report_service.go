@@ -76,11 +76,15 @@ func (s *cabOperationsReportService) BuildReport(ctx context.Context, req domain
 	if err != nil {
 		return domain.CABOperationsReport{}, err
 	}
+	open, err := s.repo.ListOpenCABChanges(ctx)
+	if err != nil {
+		return domain.CABOperationsReport{}, err
+	}
 	members, err := s.repo.ListCABMembers(ctx)
 	if err != nil {
 		return domain.CABOperationsReport{}, err
 	}
-	return buildCABOperationsReport(changes, members, from, to, now), nil
+	return buildCABOperationsReport(changes, open, members, from, to, now), nil
 }
 
 // cabReportPeriod resolves the inclusive period [from, to] (UTC midnights) from
@@ -318,7 +322,12 @@ func tallyTeam(m map[string]*cabTeamTally, c repository.CABChangeRecord, d cabDe
 // (asked on). Its outcome is that stage's (cabStageDecision). The approver
 // workload and the pushback cover every CAB stage of each change request (a
 // rejection before a resubmission is pushback too).
-func buildCABOperationsReport(changes []repository.CABChangeRecord, members []domain.CABOperationsMember, from, to, now time.Time) domain.CABOperationsReport {
+//
+// The queue is not the period's: it is built from open, the change requests in
+// Authorize whatever the period (ListOpenCABChanges), keeping those whose
+// latest CAB stage is undecided, so narrowing the dates never hides what waits
+// for the CAB now. months[].pending stays the period's own count.
+func buildCABOperationsReport(changes, open []repository.CABChangeRecord, members []domain.CABOperationsMember, from, to, now time.Time) domain.CABOperationsReport {
 	now = now.UTC()
 	report := domain.CABOperationsReport{
 		From:         from.Format("2006-01-02"),
@@ -336,7 +345,10 @@ func buildCABOperationsReport(changes []repository.CABChangeRecord, members []do
 	for m := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC); !m.After(to); m = m.AddDate(0, 1, 0) {
 		key := m.Format("2006-01")
 		monthIdx[key] = len(report.Months)
-		report.Months = append(report.Months, domain.CABOperationsMonth{Month: key, Ongoing: key == report.CurrentMonth})
+		// Partial: the period starts after the month's first day or ends before
+		// its last, so the month's figures are not a whole month's.
+		partial := from.After(m) || to.Before(m.AddDate(0, 1, -1))
+		report.Months = append(report.Months, domain.CABOperationsMonth{Month: key, Ongoing: key == report.CurrentMonth, Partial: partial})
 	}
 	dayIdx := map[string]int{}
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
@@ -502,20 +514,26 @@ func buildCABOperationsReport(changes []repository.CABChangeRecord, members []do
 			reg.CABComment = latestComment.Comment
 		}
 		report.Registry = append(report.Registry, reg)
+	}
 
-		if d.outcome == domain.CABOperationsOutcomePending {
-			q := domain.CABOperationsQueueItem{
-				ID: c.ID, Number: c.Number, Subject: c.Subject, AccountName: c.AccountName, Model: bucket,
-				Environment: c.Environment, PlannedStart: rfc3339Ptr(c.PlannedStart), OutageDeclared: c.OutageDeclared,
-				AskedOn: rfc3339(r.askedOn), Approvers: []string{},
-			}
-			for _, a := range c.Stages[len(c.Stages)-1].Approvers {
-				if a.State == "REQUESTED" {
-					q.Approvers = append(q.Approvers, cabPersonName(a.Name, a.Email))
-				}
-			}
-			report.Queue = append(report.Queue, q)
+	// The queue: what waits for the CAB now, whatever the period.
+	report.Queue = []domain.CABOperationsQueueItem{}
+	for _, c := range open {
+		if len(c.Stages) == 0 || cabStageDecision(c).outcome != domain.CABOperationsOutcomePending {
+			continue
 		}
+		latest := c.Stages[len(c.Stages)-1]
+		q := domain.CABOperationsQueueItem{
+			ID: c.ID, Number: c.Number, Subject: c.Subject, AccountName: c.AccountName, Model: cabModelBucket(c.Model),
+			Environment: c.Environment, PlannedStart: rfc3339Ptr(c.PlannedStart), OutageDeclared: c.OutageDeclared,
+			AskedOn: rfc3339(latest.CreatedOn), Approvers: []string{},
+		}
+		for _, a := range latest.Approvers {
+			if a.State == "REQUESTED" {
+				q.Approvers = append(q.Approvers, cabPersonName(a.Name, a.Email))
+			}
+		}
+		report.Queue = append(report.Queue, q)
 	}
 
 	report.Totals.ApprovalRate = cabApprovalRate(report.Totals.Approved, report.Totals.Rejected)
@@ -619,9 +637,6 @@ func buildCABOperationsReport(changes []repository.CABChangeRecord, members []do
 		report.Requesters = report.Requesters[:cabReportTopRequesters]
 	}
 
-	if report.Queue == nil {
-		report.Queue = []domain.CABOperationsQueueItem{}
-	}
 	sort.SliceStable(report.Queue, func(i, j int) bool {
 		if report.Queue[i].AskedOn != report.Queue[j].AskedOn {
 			return report.Queue[i].AskedOn < report.Queue[j].AskedOn

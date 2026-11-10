@@ -224,6 +224,24 @@ describe("CabOperationsDashboard — Overview and the month filter", () => {
     expect(within(monthChips()).getByRole("button", { name: "Nov 2026 (so far)" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("does not compare a month the period cuts short, and marks it", () => {
+    const cut = cabReportFixture();
+    cut.from = "2026-08-01";
+    cut.to = "2026-10-10";
+    cut.months = cut.months
+      .filter((m) => m.month !== "2026-11")
+      .map((m) => ({ ...m, partial: m.month === "2026-10" }));
+    cut.daily = cut.daily.filter((d) => d.day <= "2026-10-10");
+    queryStub = { ...queryStub, data: cut };
+    renderAt("/operations/cab-dashboard?month=2026-10");
+    expect(
+      screen.getByText("October 2026: only Oct 1 to Oct 10 is in the period, so it is not compared with the month before."),
+    ).toBeInTheDocument();
+    expect(tile("total")).not.toHaveTextContent(/vs /);
+    expect(within(monthChips()).getByRole("button", { name: "Oct 2026 (part)" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByTestId("cab-month-2026-10")).getByText("Part month")).toBeInTheDocument();
+  });
+
   it("has no comparison for the first month of the period", () => {
     renderAt("/operations/cab-dashboard?month=2026-08");
     expect(screen.getByText(/The month before is outside the period, so there is no comparison\./)).toBeInTheDocument();
@@ -310,6 +328,37 @@ describe("CabOperationsDashboard — the other tabs", () => {
     fireEvent.click(within(monthChips()).getByRole("button", { name: "Sep 2026" }));
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toHaveTextContent("CHG0002004");
+  });
+
+  it("keeps showing rows when the month filter shortens the registry while on a later page", () => {
+    // 30 change requests in October, 5 in September: page 2 of October, then September.
+    const base = cabReportFixture().registry[0];
+    const registry = [
+      ...Array.from({ length: 30 }, (_, i) => ({
+        ...base,
+        id: `cr-oct-${i}`,
+        number: `CHG10${String(i).padStart(3, "0")}`,
+        askedOn: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}T09:00:00Z`,
+      })),
+      ...Array.from({ length: 5 }, (_, i) => ({
+        ...base,
+        id: `cr-sep-${i}`,
+        number: `CHG20${String(i).padStart(3, "0")}`,
+        askedOn: `2026-09-${String(1 + i).padStart(2, "0")}T09:00:00Z`,
+      })),
+    ];
+    queryStub = { ...queryStub, data: { ...cabReportFixture(), registry, registryTotal: registry.length } };
+    renderAt("/operations/cab-dashboard?view=registry&month=2026-10");
+    const rows = (): HTMLElement[] => within(screen.getByRole("table", { name: "Registry" })).getAllByRole("row").slice(1);
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    expect(rows()).toHaveLength(5);
+    expect(screen.getByText("26–30 of 30")).toBeInTheDocument();
+
+    fireEvent.click(within(monthChips()).getByRole("button", { name: "Sep 2026" }));
+    expect(screen.queryByText("No change requests match.")).not.toBeInTheDocument();
+    expect(rows()).toHaveLength(5);
+    expect(rows()[0]).toHaveTextContent("CHG20");
+    expect(screen.getByText("1–5 of 5")).toBeInTheDocument();
   });
 
   it("says when the registry was cut short", () => {
