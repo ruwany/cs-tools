@@ -1571,7 +1571,10 @@ var changeRequestApprovalDecisions = map[string]bool{
 // approval for a change request. ServiceNow enforces that only the caller's own
 // pending approval can be acted on; the change request's own state cascades
 // automatically via ServiceNow's existing business rule.
-func (s *snChangeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error) {
+//
+// comment is not forwarded: the integration's decision API takes the decision
+// only, so a comment is dropped on this data source.
+func (s *snChangeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision, _ string) (domain.ChangeRequestApprovalDecisionResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	if err := validateUUIDs("id", []string{id}); err != nil {

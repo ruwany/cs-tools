@@ -8556,6 +8556,61 @@ so that function, and the internal caller's right to stamp the flags, are gone:
   code's own `ForbiddenError` instead of `work_item`'s RLS `NotFoundError`; the tests' doc comments
   say so, and the suite is also run as `csm_app` (RLS enforced).
 
+### A comment with an approval decision (`POST /change-requests/{id}/approvals/decision`, `comment`)
+
+The decision body takes an optional `comment` beside `decision` (2026-11-10, so the CAB's pushback is
+recorded where the approvals list and the CAB operations report read it). The service trims it; blank is
+none; more than `domain.MaxChangeRequestApprovalCommentRunes` (4000) characters is a 400. The decide
+UPDATE (`decideChangeRequestApprovalQuery`) writes it to the deciding approver's own
+`approval_stage_approver.comments` as `COALESCE(NULLIF($6, ''), comments)`, so a decision without one
+never erases a comment already there (a row copied from ServiceNow keeps its own). The customer's answer
+through PATCH (`answerCustomerStageViaPatch`) passes none. Optional for both decisions in the API (the
+customer portal backend sends `decision` only); the CSM webapp asks for one on a rejection. The
+ServiceNow data source and the dual-write mirror do not forward it (the previous system's decision API
+takes the decision only). Tests: `TestChangeRequestService_DecideChangeRequestApproval_Comment`,
+`TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade` (stored and read back).
+
+### The CAB operations report (`GET /reports/cab-operations`)
+
+What the CAB was asked to decide over a period and how it decided, for the Operations CAB dashboard.
+Internal callers only (`internalOnly`, and `RequireInternalCaller` again in the service); Postgres data
+sources only (not registered with `DATA_SOURCE=servicenow`). `?from=&to=` are inclusive `YYYY-MM-DD`
+UTC days; the default is the first day of the month three months before `to`'s month up to today; more
+than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
+`repository/cab_operations_report_repo.go` (rows), `service/cab_operations_report_service.go`
+(`buildCABOperationsReport`, pure: every figure), `handler/cab_operations_report_handler.go`,
+`domain/cab_operations_report.go`.
+
+- **Which stage is the CAB's** is the approvals list's own rule, reused, not re-written in SQL:
+  `isCABStageForReport` runs `changeRequestApprovalStageLabel` then `classifyApprovalStage` on each
+  stage (labelled "CAB Approval", the older "Authorize" / "ECAB Approval"; an unlabelled ServiceNow
+  stage is the CAB's when it is an Emergency change's stage in the "CAB Approval" group, else the
+  change's second stage). The state-dependent `runtimeApprovalStageKind` is not used: it says what may
+  be decided now, and a report is history. The join to `change_request` leaves out a standard change
+  proposal's stages.
+- **Counted once, by "asked on"**: a change request is in the period when its LATEST CAB stage's
+  `created_on` is (the day the CAB was asked; there is no CAB meeting record), and its outcome is that
+  stage's: one REJECTED row rejects it, else one APPROVED approves it; undecided, PENDING while the
+  change is in Authorize, else CANCELLED. `approvalRate` is approved / (approved + rejected), null when
+  none was decided. The approver workload and `pushback` (rejections, and non-blank comments on any
+  decision) cover every CAB stage, so a rejection before a resubmission is listed.
+- `prod`: the change's own deployment or any linked one (`change_request_deployment`) is
+  PRIMARY_PRODUCTION. `outageDeclared`: `service_outage_downtime` has visible text (`IsBlankRichText`).
+  Comments and the outage summary are plain text (`RichTextPlainText`, `repository/rich_text_plain.go`:
+  the same parse as `IsBlankRichText`, tags removed, never HTML). Teams are assignment groups (the
+  database records no delivery stream). `registry` is capped at 2000 rows (`truncated`,
+  `registryTotal`), `pushback` at 200 (`pushbackTotal`). `cabMembers` is the "CAB Approval" group
+  resolved by `namedGroup`, active internal users only.
+- **Query**: stages are read by `approval_stage.created_on` in range (sargable), then the touched
+  changes' other stages, approvers and change rows by id. No index was added: on 80,000 stages the plan
+  scans `approval_stage` twice and hash joins in about 40 ms (EXPLAIN ANALYZE, 2026-11-10).
+- Tests: `TestBuildCABOperationsReport` (bucketing, rates, outcomes, weeks, teams, pushback),
+  `TestBuildCABOperationsReport_Caps`, `TestCABStageDecision`, `TestCABReportPeriod` (service),
+  `TestCABOperationsReportHandler`, `TestRichTextPlainText`, `TestIsCABStageForReport`,
+  `TestCABOperationsReportIntegration_ListCABChanges` (labelled and ServiceNow-style unlabelled CAB
+  stages, approved / rejected / pending / cancelled, a resubmission, a proposal's stage; skipped
+  without `CHANGE_REQUEST_TEST_DSN`).
+
 ## Standard changes: templates, proposals and the CAB
 
 A **standard change** is pre-authorised at the level of its *template* (ITIL 4 change enablement):

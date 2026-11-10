@@ -253,8 +253,10 @@ type ChangeRequestRepository interface {
 	// Authorize when this decision is the one that resolves that stage's own
 	// approval (first-responder-wins, same quorum rule as
 	// buildChangeRequestApprovals) -- see this method's own doc comment for
-	// the full reasoning and its deliberately narrow scope.
-	DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error)
+	// the full reasoning and its deliberately narrow scope. comment (already
+	// trimmed and length-checked by the service; "" for none) is written to the
+	// same row's comments; "" leaves the column as it was.
+	DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail, comment string) (string, error)
 }
 
 type changeRequestRepo struct {
@@ -3274,9 +3276,14 @@ func buildChangeRequestApprovals(stages []changeRequestApprovalStageRow, approve
 // row). It narrows the UPDATE to that one stage when the caller holds pending
 // rows on several (a stale one left over from before the state reconcile and a
 // live one): deciding must never resolve a row of another stage along with it.
+//
+// $6 is the approver's comment ("" for none): written to the row's comments, which
+// the approvals list and the CAB operations report read. A blank one leaves the
+// column as it was, so a decision without a comment never erases one.
 const decideChangeRequestApprovalQuery = `
 	UPDATE approval_stage_approver
-	SET state = $3, updated_on = NOW(), updated_by = $4
+	SET state = $3, updated_on = NOW(), updated_by = $4,
+	    comments = COALESCE(NULLIF($6::text, ''), comments)
 	WHERE work_item_id = $1 AND approver_user_id = $2 AND state = 'REQUESTED'
 	  AND ($5::uuid IS NULL OR stage_id = $5::uuid)
 	RETURNING id, stage_id`
@@ -3359,7 +3366,7 @@ func cancelSiblingApprovalStageApprovers(ctx context.Context, tx pgx.Tx, stageID
 // from. The cascade is keyed on both the state AND the kind of the decided
 // stage, so approving a CAB stage never advances a change that is somehow still
 // reading Assess.
-func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error) {
+func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail, comment string) (string, error) {
 	ctx = withCRVisibility(ctx, r.vis)
 	// InTxReturning: Scoped stamps the caller identity on the transaction's
 	// own session (the base branch's r.db.Begin is not available on Scoped).
@@ -3377,7 +3384,7 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 		if err := ensureCustomerStageForLegacy(ctx, tx, id, actorEmail); err != nil {
 			return "", err
 		}
-		return decideChangeRequestApprovalTx(ctx, tx, id, approverUserID, decision, actorEmail)
+		return decideChangeRequestApprovalTx(ctx, tx, id, approverUserID, decision, actorEmail, comment)
 	})
 }
 
@@ -3386,8 +3393,9 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 // their own pending approval": the approvals/decision route calls it directly, and
 // so does the PATCH {isCustomerApproved / isCustomerReviewed} path a customer
 // uses (answerCustomerStageViaPatch), so both mechanisms record the same stage
-// rows, move the state the same way and stamp the same flags.
-func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverUserID, decision, actorEmail string) (string, error) {
+// rows, move the state the same way and stamp the same flags. comment is the
+// approver's comment ("" for none; the PATCH path has none).
+func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverUserID, decision, actorEmail, comment string) (string, error) {
 	// The approval tables also hold the CAB stage of a standard change proposal
 	// (another work item type, decided only through its own route, which records
 	// the outcome on the proposal): never decided here.
@@ -3431,7 +3439,7 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 
 	var approvalID string
 	var stageID *string
-	err = tx.QueryRow(ctx, decideChangeRequestApprovalQuery, id, approverUserID, strings.ToUpper(decision), actorEmail, pendingStageID).Scan(&approvalID, &stageID)
+	err = tx.QueryRow(ctx, decideChangeRequestApprovalQuery, id, approverUserID, strings.ToUpper(decision), actorEmail, pendingStageID, comment).Scan(&approvalID, &stageID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// A change waiting on the customer group's answer: say who may give
 		// it, rather than a bare "no pending approval" for someone who is

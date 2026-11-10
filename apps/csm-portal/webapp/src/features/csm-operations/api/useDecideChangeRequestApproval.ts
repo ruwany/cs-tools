@@ -30,6 +30,8 @@ import type {
 export interface DecideChangeRequestApprovalInput {
   id: string;
   decision: BeChangeRequestApprovalDecision;
+  /** The approver's comment; sent only when it has text. */
+  comment?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export function useDecideChangeRequestApproval(): UseMutationResult<
         BeChangeRequestApprovalDecisionResponse
       >(`/change-requests/${encodeURIComponent(input.id)}/approvals/decision`, {
         decision: input.decision,
+        ...(input.comment?.trim() ? { comment: input.comment.trim() } : {}),
       }),
     onSuccess: (_data, variables) => invalidateChangeRequest(variables.id),
     onError: (err, variables) => {

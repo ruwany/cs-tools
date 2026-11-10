@@ -685,7 +685,7 @@ func answerCustomerStageViaPatch(ctx context.Context, tx pgx.Tx, id string, p cu
 	if p.approved {
 		decision = "approved"
 	}
-	if _, err := decideChangeRequestApprovalTx(ctx, tx, id, userID, decision, actorEmail); err != nil {
+	if _, err := decideChangeRequestApprovalTx(ctx, tx, id, userID, decision, actorEmail, ""); err != nil {
 		return "", err
 	}
 	return id, nil

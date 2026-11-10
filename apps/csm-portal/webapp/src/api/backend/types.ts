@@ -2979,6 +2979,10 @@ export type BeChangeRequestApprovalDecision = "approved" | "rejected";
 /** `POST /change-requests/{id}/approvals/decision` request body. */
 export interface BeChangeRequestApprovalDecisionPayload {
   decision: BeChangeRequestApprovalDecision;
+  /** Optional: what the approver says with the decision (trimmed by the
+   * backend, at most 4000 characters; blank is none). Stored on the approver's
+   * own row and read back as `BeChangeRequestApprover.comments`. */
+  comment?: string;
 }
 
 /** `POST /change-requests/{id}/approvals/decision` response. */

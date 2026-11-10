@@ -2299,7 +2299,10 @@ function lcSeed(
   // The approvals panel's Approve/Reject drives the fake as the signed-in user. The
   // customer stages are not decided from this page (the customer answers in the customer
   // portal, see `lcCustomerDecides`), so only the internal stages are candidates.
-  decideApprovalMutateMock.mockImplementation((input: { decision: "approved" | "rejected" }) => {
+  // The approvals panel sends a decision from its dialog with mutate(input, {onSuccess, onError}):
+  // like React Query, a refusal goes to onError (the dialog shows it) and a success to onSuccess
+  // (the dialog closes). Called with no options (a test calling the fake directly) it throws.
+  const decide = (input: { decision: "approved" | "rejected"; comment?: string }): void => {
     // The caller's pending stage: their row on a stage decidable in the CR's
     // current state, else (all of theirs are stale) their first one.
     const mine = lc.approvals.filter(
@@ -2321,6 +2324,7 @@ function lcSeed(
       );
     }
     row.status = input.decision === "approved" ? "APPROVED" : "REJECTED";
+    if (input.comment) row.comments = input.comment;
     current.status = row.status;
     // A resolving decision cancels the stage's other pending approvers.
     current.approvers.forEach((a) => {
@@ -2337,7 +2341,22 @@ function lcSeed(
     }
     lcReconcile();
     lcPublish();
-  });
+  };
+  decideApprovalMutateMock.mockImplementation(
+    (
+      input: { decision: "approved" | "rejected"; comment?: string },
+      options?: { onSuccess?: () => void; onError?: (err: unknown) => void },
+    ) => {
+      try {
+        decide(input);
+      } catch (err) {
+        if (!options?.onError) throw err;
+        options.onError(err);
+        return;
+      }
+      options?.onSuccess?.();
+    },
+  );
   lcPublish();
 }
 
@@ -2527,7 +2546,7 @@ async function runNormalLifecycle(approval: boolean, review: boolean): Promise<v
 
   // A peer approves -> Authorize, CAB Approval is the next, separate stage.
   view = lcOpenAs(LC_PEER, view);
-  fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+  lcClickDecision("approved");
   expect(currentStep()).toBe("Authorize");
   expect(screen.getByText("Awaiting CAB Approval")).toBeInTheDocument();
   expect(within(approvalsRow("Cam Cab")).getByText("CAB Approval")).toBeInTheDocument();
@@ -2538,7 +2557,7 @@ async function runNormalLifecycle(approval: boolean, review: boolean): Promise<v
   // A CAB member approves -> Customer Approval when required, else Scheduled.
   view = lcOpenAs(LC_CAB, view);
   expect(screen.getByRole("button", { name: /^approve$/i })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+  lcClickDecision("approved");
   expect(patchMutateMock).toHaveBeenCalledTimes(1); // only Request Approval was ever a manual PATCH so far
 
   view = lcOpenAs(LC_CREATOR, view);
@@ -2639,7 +2658,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Normal (Request Approval -> 
     lcOpenAs(LC_CREATOR);
     expect(screen.getByRole("button", { name: /^approve$/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^reject$/i })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(decideApprovalMutateMock).not.toHaveBeenCalled();
   });
 });
@@ -2661,9 +2680,9 @@ describe("CsmChangeRequestDetailPage — lifecycle: a Review approver's Approve 
     let view = lcOpenAs(LC_CREATOR);
     fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
     view = lcOpenAs(LC_PEER, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     view = lcOpenAs(LC_CREATOR, view);
     fireEvent.click(screen.getByRole("button", { name: /^start implementation$/i }));
     fireEvent.click(screen.getByRole("button", { name: /^mark implemented$/i }));
@@ -2762,7 +2781,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: a Review approver's Approve 
   it("deciding Review records the answer, cancels the other members and leaves the change in Review", () => {
     let view = driveToReview(false);
     view = lcOpenAs(LC_PEER, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Review"); // a human moves it on
     expect(reviewControls("Pat Peer").status).toBe("Approved");
     expect(reviewControls("Quinn Peer").status).toBe("Cancelled");
@@ -2814,10 +2833,10 @@ describe("CsmChangeRequestDetailPage — lifecycle: Roll back", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
     expect(currentStep()).toBe("Assess");
     view = lcOpenAs(LC_PEER, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Authorize");
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     view = lcOpenAs(LC_CREATOR, view);
     expect(currentStep()).toBe("Scheduled");
     // Roll back is not on offer before the review.
@@ -2958,11 +2977,11 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
     if (type === "normal") {
       view = lcOpenAs(LC_PEER, view);
-      fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+      lcClickDecision("approved");
     }
     if (type !== "standard") {
       view = lcOpenAs(LC_CAB, view);
-      fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+      lcClickDecision("approved");
     }
     view = lcOpenAs(LC_CREATOR, view);
     expect(currentStep()).toBe("Customer Approval");
@@ -3796,7 +3815,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
       expect(queryBanner()).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /re-schedule|propose a different time|accept proposed time/i })).not.toBeInTheDocument();
       view = lcOpenAs(LC_CAB, view);
-      fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+      lcClickDecision("approved");
       expect(lc.cr.state).toBe("customer_approval"); // the CAB's approval asks the customer again, as it always did
       view.unmount();
     });
@@ -3869,7 +3888,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
     expectNoManualSchedule();
 
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Scheduled");
     expect(screen.queryByText(/awaiting/i)).not.toBeInTheDocument();
     expectNoManualSchedule();
@@ -3906,7 +3925,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
       "Canceled=not taken",
     ]);
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(line()).toEqual([
       "New=done",
       "Assess=not taken",
@@ -3938,7 +3957,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
     }
     fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Scheduled");
     expect(notApplicable("Customer approval required")).toBe("Not applicable");
     view.unmount();
@@ -3966,7 +3985,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: an Emergency change never re
     expectNoManualSchedule();
 
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Scheduled");
     expect(screen.queryByText(/awaiting/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Awaiting Customer Approval")).not.toBeInTheDocument();
@@ -4007,7 +4026,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: an Emergency change never re
     expect(lc.approvals.map((a) => a.stage)).toEqual(["CAB Approval"]);
 
     view = lcOpenAs(LC_CAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Scheduled");
     expect(lc.approvals.some((a) => lcIsCustomerStage(a.stage))).toBe(false);
     view.unmount();
@@ -4064,7 +4083,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: an Emergency change never re
     expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
 
     view = lcOpenAs(LC_ECAB, view);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    lcClickDecision("approved");
     expect(currentStep()).toBe("Scheduled");
     expect(screen.queryByText(/awaiting/i)).not.toBeInTheDocument();
     view.unmount();
@@ -4282,13 +4301,29 @@ const LC_MEMBERS = [
 ];
 
 /** Drives a seeded CR from New to the point its internal approval is granted. */
+/**
+ * Clicks Approve / Reject on the signed-in user's row and, when that opens the decision dialog
+ * (the button was enabled), confirms it: an approval with no comment, a rejection with one
+ * (the dialog requires it).
+ */
+function lcClickDecision(decision: "approved" | "rejected", comment = "Not ready"): void {
+  const label = decision === "approved" ? "Approve" : "Reject";
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}$`, "i") }));
+  const dialog = screen.queryByRole("dialog", { name: new RegExp(`^${label} this change request\\?$`, "i") });
+  if (!dialog) return;
+  if (decision === "rejected") {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: comment } });
+  }
+  fireEvent.click(within(dialog).getByRole("button", { name: label }));
+}
+
 function lcGoThroughInternalApproval(view: ReturnType<typeof render>): ReturnType<typeof render> {
   view = lcOpenAs(LC_CREATOR, view);
   fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
   view = lcOpenAs(LC_PEER, view);
-  fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+  lcClickDecision("approved");
   view = lcOpenAs(LC_CAB, view);
-  fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+  lcClickDecision("approved");
   return view;
 }
 

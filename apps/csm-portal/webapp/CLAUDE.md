@@ -864,6 +864,22 @@ In `ChangeRequestApprovals`, each row's **Assignment group** is a link-button (`
 - Test by role/name, not by position: the cell now holds a button, so a row's first `button` is no longer Approve (`within(row).getByRole("button", { name: "Approve" })`).
 - e2e: `fakeChangeRequestApi.ts` serves `GET /groups/{id}` (`FAKE_PEER_GROUP` / `FAKE_CAB_GROUP`, and `FAKE_ECAB_GROUP` for an older Emergency change's stage), puts `assignmentGroup` on every internal stage (`null` on the customer ones) and has `failGroups(status)` for the error state; the cases live in `change-request-lifecycle.spec.ts` ("opening an Assignment group", fake API) plus two against the real local stack in its "seeded fixtures" block (CHG-FIXED-004's Example Corp ABT group lists Alice, Bob and Carol -- not Jane, who is only in the team, nor the customer John -- and CHG-FIXED-007's Customer Group lists Dave and Erin), which need the rebuilt BFF and entity-service.
 
+### Approve / Reject ask for a comment first (`ChangeRequestApprovalDecisionDialog`)
+
+Approve and Reject on the user's own row do not send the decision straight away: they open
+`ChangeRequestApprovalDecisionDialog` ("Approve this change request?" / "Reject this change request?"), a
+Comment field and the confirm button. The comment is **optional to approve and required to reject** (a
+blank one keeps Reject disabled), at most 4000 characters (counted in code points, as the backend counts;
+more shows the count and disables the confirm). `useDecideChangeRequestApproval` sends it as `comment`
+(trimmed, left out when blank); the backend stores it on the approver's own row, so it appears in the
+Comments column (which keeps line breaks and wraps at 360px) and in the CAB dashboard's pushback. The dialog
+closes when the decision is recorded; a refusal (any 4xx's own words, else "Could not approve / reject the
+change request.") is shown **inside the dialog** with the typed comment kept, not in the page banner behind it.
+Tests: `ChangeRequestApprovals.test.tsx`, `useDecideChangeRequestApproval.test.tsx`; the page test's fake
+honours `mutate(input, {onSuccess, onError})` and its `lcClickDecision` helper confirms the dialog; e2e
+page object `approve()` / `reject(name, comment)` / `decisionDialog()`, and the fake API stores the comment
+on the row.
+
 ## Change request lifecycle stepper
 
 `ChangeRequestLifecycleStepper` (full width, under the detail page's header) plots the **customer portal's eleven-stage "Change Request Workflow"**, in its order and its wording -- New, Assess, Authorize, Customer Approval, Scheduled, Implement, Review, Customer Review, **Rollback**, Closed, **Canceled** -- as a *horizontal* line (the customer portal's is a vertical timeline). Everything it decides is the pure `buildChangeRequestLifecycle` (`features/csm-operations/utils/changeRequestStages.ts`, unit-tested for every state x checkbox combination); the component only draws it.

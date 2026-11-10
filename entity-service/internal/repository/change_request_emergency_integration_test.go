@@ -369,7 +369,7 @@ func TestChangeRequestEmergencyIntegration_MigratedEmergencyInACustomerStateIsAn
 	})
 	t.Run("Customer Approval: the decision route does the same", func(t *testing.T) {
 		f, id := migrated(t, "CUSTOMER_APPROVAL", true)
-		if _, err := f.repo.DecideChangeRequestApproval(asContact(crScopeUserA2), id, crScopeUserA2, "approved", crFlowEmail(crScopeUserA2)); err != nil {
+		if _, err := f.repo.DecideChangeRequestApproval(asContact(crScopeUserA2), id, crScopeUserA2, "approved", crFlowEmail(crScopeUserA2), ""); err != nil {
 			t.Fatalf("the customer's decision: %v", err)
 		}
 		f.expect(id, "after the decision", "SCHEDULED", "implement", "canceled")

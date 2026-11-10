@@ -334,7 +334,7 @@ func TestChangeRequestIntegration_DecideApprovalCascadesAssessToAuthorize(t *tes
 	seedApprovalStageForDecisionTest(t, scoped, changeRequestApprovalApproverUserID)
 
 	if _, err := repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID, "approved", "cr-approval-test"); err != nil {
+		changeRequestApprovalApproverUserID, "approved", "cr-approval-test", ""); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(approved): %v", err)
 	}
 
@@ -383,8 +383,11 @@ func TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade(t *testi
 	seedChangeRequestForApprovalTest(t, scoped, "ASSESS")
 	seedApprovalStageForDecisionTest(t, scoped, changeRequestApprovalApproverUserID)
 
+	// The rejection carries the approver's comment: it is stored on their own
+	// approver row, and the approvals read returns it.
+	const comment = "No rollback plan for the database step"
 	if _, err := repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID, "rejected", "cr-approval-test"); err != nil {
+		changeRequestApprovalApproverUserID, "rejected", "cr-approval-test", comment); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(rejected): %v", err)
 	}
 
@@ -395,6 +398,23 @@ func TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade(t *testi
 	}
 	if gotState != "ASSESS" {
 		t.Fatalf("state after rejection = %q, want unchanged \"ASSESS\"", gotState)
+	}
+	var gotComment *string
+	if scanErr := scoped.QueryRow(sys,
+		`SELECT comments FROM approval_stage_approver WHERE work_item_id = $1 AND approver_user_id = $2`,
+		changeRequestApprovalTestID, changeRequestApprovalApproverUserID).Scan(&gotComment); scanErr != nil {
+		t.Fatalf("read back comments: %v", scanErr)
+	}
+	if gotComment == nil || *gotComment != comment {
+		t.Fatalf("comments after rejection = %v, want %q", gotComment, comment)
+	}
+	approvals, err := repo.GetChangeRequestApprovals(sys, changeRequestApprovalTestID)
+	if err != nil {
+		t.Fatalf("GetChangeRequestApprovals: %v", err)
+	}
+	if len(approvals.Approvals) != 1 || len(approvals.Approvals[0].Approvers) != 1 ||
+		approvals.Approvals[0].Approvers[0].Comments == nil || *approvals.Approvals[0].Approvers[0].Comments != comment {
+		t.Fatalf("approvals read = %+v, want the one approver with comment %q", approvals, comment)
 	}
 }
 
@@ -431,7 +451,7 @@ func TestChangeRequestIntegration_DecideApprovalDoesNotCascadeOutsideAssess(t *t
 	seedApprovalStageForDecisionTest(t, scoped, changeRequestApprovalApproverUserID)
 
 	if _, err = repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID, "approved", "cr-approval-test"); err != nil {
+		changeRequestApprovalApproverUserID, "approved", "cr-approval-test", ""); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(approved) on an unlabeled position-0 stage of a change in Authorize: %v", err)
 	}
 
@@ -486,7 +506,7 @@ func TestChangeRequestIntegration_DecideApprovalCancelsSiblingApprovers(t *testi
 		changeRequestApprovalApproverUserID, changeRequestApprovalApproverUserID2, changeRequestApprovalApproverUserID3)
 
 	if _, err := repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID, "approved", "cr-approval-test"); err != nil {
+		changeRequestApprovalApproverUserID, "approved", "cr-approval-test", ""); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(approved): %v", err)
 	}
 
@@ -587,7 +607,7 @@ func TestChangeRequestIntegration_DecideRejectionCancelsSiblingApprovers(t *test
 		changeRequestApprovalApproverUserID, changeRequestApprovalApproverUserID2, changeRequestApprovalApproverUserID3)
 
 	if _, err := repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID, "rejected", "cr-approval-test"); err != nil {
+		changeRequestApprovalApproverUserID, "rejected", "cr-approval-test", ""); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(rejected): %v", err)
 	}
 
@@ -670,7 +690,7 @@ func TestChangeRequestIntegration_DecideRejectionCancelsSiblingApproversAtEveryC
 				changeRequestApprovalApproverUserID, changeRequestApprovalApproverUserID2, changeRequestApprovalApproverUserID3)
 
 			if _, err := repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-				changeRequestApprovalApproverUserID, "rejected", "cr-approval-test"); err != nil {
+				changeRequestApprovalApproverUserID, "rejected", "cr-approval-test", ""); err != nil {
 				t.Fatalf("DecideChangeRequestApproval(rejected): %v", err)
 			}
 
@@ -759,7 +779,7 @@ func TestChangeRequestIntegration_DecideRejectionDoesNotDisturbAlreadyApprovedSt
 	}
 
 	if _, err := repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID3, "rejected", "cr-approval-test"); err != nil {
+		changeRequestApprovalApproverUserID3, "rejected", "cr-approval-test", ""); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(rejected): %v", err)
 	}
 
@@ -2130,7 +2150,7 @@ func TestChangeRequestIntegration_AssessAuthorizeAndReviewStagesCoexist(t *testi
 	}
 
 	if _, err := repo.DecideChangeRequestApproval(sys, changeRequestAssessGateTestID,
-		changeRequestAssessGateMemberUserID, "approved", "cr-assess-gate-test"); err != nil {
+		changeRequestAssessGateMemberUserID, "approved", "cr-assess-gate-test", ""); err != nil {
 		t.Fatalf("DecideChangeRequestApproval(approved): %v", err)
 	}
 
@@ -3667,7 +3687,7 @@ func (f *crFlow) stages(id string) []crFlowStage {
 }
 
 func (f *crFlow) decide(id, userID, decision string) error {
-	_, err := f.repo.DecideChangeRequestApproval(f.sys, id, userID, decision, crFlowEmail(userID))
+	_, err := f.repo.DecideChangeRequestApproval(f.sys, id, userID, decision, crFlowEmail(userID), "")
 	return err
 }
 

@@ -142,7 +142,11 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	result, err := h.svc.DecideChangeRequestApproval(r.Context(), id, req.Decision)
+	comment := ""
+	if req.Comment != nil {
+		comment = *req.Comment
+	}
+	result, err := h.svc.DecideChangeRequestApproval(r.Context(), id, req.Decision, comment)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

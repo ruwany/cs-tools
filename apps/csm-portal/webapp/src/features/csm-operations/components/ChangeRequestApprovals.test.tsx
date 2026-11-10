@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -91,6 +91,20 @@ function mockDecideMutation(overrides: { isPending?: boolean } = {}): void {
     mutate: decideMutateMock,
     isPending: overrides.isPending ?? false,
   });
+}
+
+/** The decision dialog Approve / Reject opens. */
+function decisionDialog(): HTMLElement {
+  return screen.getByRole("dialog", { name: /(approve|reject) this change request\?/i });
+}
+
+/** Confirms the open decision dialog, typing `comment` first when given. */
+function confirmDecision(label: "Approve" | "Reject", comment?: string): void {
+  const dialog = decisionDialog();
+  if (comment !== undefined) {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: comment } });
+  }
+  fireEvent.click(within(dialog).getByRole("button", { name: label }));
 }
 
 describe("ChangeRequestApprovals", () => {
@@ -303,30 +317,85 @@ describe("ChangeRequestApprovals", () => {
       expect(screen.queryByText("Reject")).not.toBeInTheDocument();
     });
 
-    it("submits the decision with the CR id when Approve is clicked", () => {
+    it("asks for an optional comment before it approves, and sends none when left blank", () => {
       mockQueryResult({ data: approvalsWithMyPending });
       mockCurrentUser("me-id");
       render(<ChangeRequestApprovals id="chg-1" />);
 
       fireEvent.click(screen.getByText("Approve"));
+      expect(decideMutateMock).not.toHaveBeenCalled();
+      const dialog = decisionDialog();
+      expect(within(dialog).getByRole("textbox", { name: /comment/i })).not.toBeRequired();
+      expect(within(dialog).getByRole("button", { name: "Approve" })).toBeEnabled();
+      confirmDecision("Approve");
 
       expect(decideMutateMock).toHaveBeenCalledWith(
         { id: "chg-1", decision: "approved" },
-        expect.objectContaining({ onError: expect.any(Function) }),
+        expect.objectContaining({ onError: expect.any(Function), onSuccess: expect.any(Function) }),
       );
     });
 
-    it("submits the decision with the CR id when Reject is clicked", () => {
+    it("sends the approval's comment, trimmed", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Approve"));
+      confirmDecision("Approve", "  Add the verification steps  ");
+
+      expect(decideMutateMock).toHaveBeenCalledWith(
+        { id: "chg-1", decision: "approved", comment: "Add the verification steps" },
+        expect.anything(),
+      );
+    });
+
+    it("needs a comment to reject, and sends it with the decision", () => {
       mockQueryResult({ data: approvalsWithMyPending });
       mockCurrentUser("me-id");
       render(<ChangeRequestApprovals id="chg-1" />);
 
       fireEvent.click(screen.getByText("Reject"));
+      const dialog = decisionDialog();
+      expect(within(dialog).getByRole("textbox", { name: /comment/i })).toBeRequired();
+      expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: "   " } });
+      expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+      confirmDecision("Reject", "No rollback plan for the database step");
 
       expect(decideMutateMock).toHaveBeenCalledWith(
-        { id: "chg-1", decision: "rejected" },
+        { id: "chg-1", decision: "rejected", comment: "No rollback plan for the database step" },
         expect.objectContaining({ onError: expect.any(Function) }),
       );
+    });
+
+    it("refuses a comment over 4000 characters before anything is sent", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Reject"));
+      const dialog = decisionDialog();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), {
+        target: { value: "é".repeat(4001) },
+      });
+      expect(within(dialog).getByText(/At most 4000 characters \(4001 now\)/)).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Reject" })).toBeDisabled();
+    });
+
+    it("closes the dialog once the decision is recorded, and Go back closes it without deciding", () => {
+      mockQueryResult({ data: approvalsWithMyPending });
+      mockCurrentUser("me-id");
+      render(<ChangeRequestApprovals id="chg-1" />);
+
+      fireEvent.click(screen.getByText("Reject"));
+      fireEvent.click(within(decisionDialog()).getByRole("button", { name: "Go back" }));
+      expect(decideMutateMock).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText("Approve"));
+      confirmDecision("Approve");
+      const onSuccess = decideMutateMock.mock.calls[0]![1].onSuccess as () => void;
+      act(() => onSuccess());
+      expect(screen.queryByRole("dialog", { name: /approve this change request/i })).not.toBeInTheDocument();
     });
 
     it("disables Approve/Reject while a decision is in flight", () => {
@@ -401,6 +470,7 @@ describe("ChangeRequestApprovals — Peer / CAB stages (and a historic ECAB one)
     const row = screen.getByText("Ecab One").closest("tr") as HTMLElement;
     expect(within(row).getByRole("button", { name: "Approve" })).toBeEnabled();
     fireEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    confirmDecision("Approve");
     expect(decideMutateMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -506,6 +576,7 @@ describe("ChangeRequestApprovals — the creator cannot approve", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText("Approve").closest("button")).toBeEnabled();
     fireEvent.click(screen.getByText("Approve"));
+    confirmDecision("Approve");
     expect(decideMutateMock).toHaveBeenCalledWith(
       { id: "chg-1", decision: "approved" },
       expect.anything(),
@@ -530,18 +601,22 @@ describe("ChangeRequestApprovals — the creator cannot approve", () => {
     expect(screen.getByText("Approve").closest("button")).toBeEnabled();
   });
 
-  it("surfaces the backend's readable 403 message when a decision is refused", () => {
+  it("shows the backend's readable 403 message in the dialog when a decision is refused, keeping the comment", () => {
     mockQueryResult({ data: stages("me-id") });
     mockCurrentUser("me-id");
     render(<ChangeRequestApprovals id="chg-1" />);
     fireEvent.click(screen.getByText("Approve"));
+    confirmDecision("Approve", "Looks fine");
     const onError = decideMutateMock.mock.calls[0]![1].onError as (e: unknown) => void;
     const err = new (BackendApiError as unknown as new (s: number, m: string) => Error)(
       403,
       "The creator of a change request cannot approve it.",
     );
-    onError(err);
-    expect(showErrorMock).toHaveBeenCalledWith("The creator of a change request cannot approve it.", err);
+    act(() => onError(err));
+    const dialog = decisionDialog();
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("The creator of a change request cannot approve it.");
+    expect(within(dialog).getByRole("textbox", { name: /comment/i })).toHaveValue("Looks fine");
+    expect(showErrorMock).not.toHaveBeenCalled();
   });
 
   it("falls back to a generic message for a non-backend or 5xx failure", () => {
@@ -549,9 +624,10 @@ describe("ChangeRequestApprovals — the creator cannot approve", () => {
     mockCurrentUser("me-id");
     render(<ChangeRequestApprovals id="chg-1" />);
     fireEvent.click(screen.getByText("Reject"));
+    confirmDecision("Reject", "Too risky");
     const onError = decideMutateMock.mock.calls[0]![1].onError as (e: unknown) => void;
-    onError(new Error("boom"));
-    expect(showErrorMock).toHaveBeenCalledWith("Could not reject the change request.", expect.any(Error));
+    act(() => onError(new Error("boom")));
+    expect(within(decisionDialog()).getByRole("alert")).toHaveTextContent("Could not reject the change request.");
   });
 
   it("treats an absent canDecide as unknown and leaves the controls enabled", () => {
@@ -647,12 +723,13 @@ describe("ChangeRequestApprovals — a Review approver across the change request
     mockQueryResult({ data: reviewData("REQUESTED", true) });
     render(<ChangeRequestApprovals id="chg-1" />);
     fireEvent.click(within(reviewRow("Rita Reviewer")).getByRole("button", { name: /^approve$/i }));
+    confirmDecision("Approve");
     const onError = decideMutateMock.mock.calls[0]![1].onError as (e: unknown) => void;
     const message =
       "this approval is no longer pending: the change request is in Closed, but the Review stage can only be decided while it is in Review";
     const err = new (BackendApiError as unknown as new (s: number, m: string) => Error)(409, message);
-    onError(err);
-    expect(showErrorMock).toHaveBeenCalledWith(message, err);
+    act(() => onError(err));
+    expect(within(decisionDialog()).getByRole("alert")).toHaveTextContent(message);
   });
 });
 
@@ -1099,12 +1176,18 @@ describe("ChangeRequestApprovals — opening an Assignment group", () => {
     const row = screen.getByText("Pat Peer").closest("tr")!;
 
     fireEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    confirmDecision("Approve");
     expect(decideMutateMock).toHaveBeenCalledWith({ id: "chg-1", decision: "approved" }, expect.anything());
+    act(() => (decideMutateMock.mock.calls[0]![1].onSuccess as () => void)());
 
     openRow("Pat Peer", "Example Corp ABT");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
 
     fireEvent.click(within(row).getByRole("button", { name: "Reject" }));
-    expect(decideMutateMock).toHaveBeenLastCalledWith({ id: "chg-1", decision: "rejected" }, expect.anything());
+    confirmDecision("Reject", "Not this week");
+    expect(decideMutateMock).toHaveBeenLastCalledWith(
+      { id: "chg-1", decision: "rejected", comment: "Not this week" },
+      expect.anything(),
+    );
   });
 });

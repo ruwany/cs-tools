@@ -37,7 +37,7 @@ import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { BackendApiError } from "@api/backend/client";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
-import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import ChangeRequestApprovalDecisionDialog from "@features/csm-operations/components/ChangeRequestApprovalDecisionDialog";
 import ApprovalGroupDialog, {
   type ApprovalGroupPerson,
   type ApprovalGroupTarget,
@@ -89,8 +89,17 @@ function isMyPendingApproval(approver: BeChangeRequestApprover, currentUserId?: 
 }
 
 interface DecideHandlers {
+  /** Opens the decision dialog, which asks for the comment and sends the decision. */
   onDecide: (decision: BeChangeRequestApprovalDecision) => void;
   isDeciding: boolean;
+}
+
+function decisionErrorMessage(err: unknown, decision: BeChangeRequestApprovalDecision): string {
+  // The backend refuses with a readable 4xx message (e.g. 403 "the creator of a
+  // change request cannot approve it", or a 409 when the change moved on) --
+  // show that rather than a generic failure.
+  if (err instanceof BackendApiError && err.status < 500 && err.message) return err.message;
+  return decision === "approved" ? "Could not approve the change request." : "Could not reject the change request.";
 }
 
 /** One flattened row: an individual approver plus the assignment group of the
@@ -258,34 +267,49 @@ export default function ChangeRequestApprovals({
 }): JSX.Element | null {
   const { data, isLoading, isError, error } = useGetChangeRequestApprovals(id);
   const { user } = useCurrentUser();
-  const { showError } = useErrorBanner();
   const decideApproval = useDecideChangeRequestApproval();
   // The group whose page is open (clicked from an Assignment group cell).
   const [openGroup, setOpenGroup] = useState<ApprovalGroupTarget | null>(null);
+  // The decision whose dialog is open (Approve or Reject clicked), and the
+  // message of its last refused attempt. The dialog keeps the typed comment, so
+  // a refusal is shown inside it rather than in the page banner behind it.
+  const [pendingDecision, setPendingDecision] = useState<BeChangeRequestApprovalDecision | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
 
   const decide: DecideHandlers | undefined = id
     ? {
         isDeciding: decideApproval.isPending,
-        onDecide: (decision) =>
-          decideApproval.mutate(
-            { id, decision },
-            {
-              // The backend refuses with a readable 4xx message (e.g. 403 "the
-              // creator of a change request cannot approve it") -- show that
-              // rather than a generic failure.
-              onError: (err) =>
-                showError(
-                  err instanceof BackendApiError && err.status < 500 && err.message
-                    ? err.message
-                    : decision === "approved"
-                      ? "Could not approve the change request."
-                      : "Could not reject the change request.",
-                  err,
-                ),
-            },
-          ),
+        onDecide: (decision) => {
+          setDecisionError(null);
+          setPendingDecision(decision);
+        },
       }
     : undefined;
+
+  const submitDecision = (decision: BeChangeRequestApprovalDecision, comment: string): void => {
+    if (!id) return;
+    setDecisionError(null);
+    decideApproval.mutate(
+      { id, decision, ...(comment ? { comment } : {}) },
+      {
+        onSuccess: () => setPendingDecision(null),
+        onError: (err) => setDecisionError(decisionErrorMessage(err, decision)),
+      },
+    );
+  };
+
+  const decisionDialog = pendingDecision ? (
+    <ChangeRequestApprovalDecisionDialog
+      decision={pendingDecision}
+      isSubmitting={decideApproval.isPending}
+      error={decisionError}
+      onClose={() => {
+        setPendingDecision(null);
+        setDecisionError(null);
+      }}
+      onConfirm={(comment) => submitDecision(pendingDecision, comment)}
+    />
+  ) : null;
 
   if (isLoading) {
     return (
@@ -384,7 +408,9 @@ export default function ChangeRequestApprovals({
                         groupName
                       )}
                     </TableCell>
-                    <TableCell>{approver.comments?.trim() || "—"}</TableCell>
+                    <TableCell sx={{ maxWidth: 360, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                      {approver.comments?.trim() || "—"}
+                    </TableCell>
                     <TableCell>{formatDateTime(approver.createdOn)}</TableCell>
                     <TableCell>{formatDateTime(approver.respondedOn)}</TableCell>
                     <TableCell>
@@ -404,6 +430,7 @@ export default function ChangeRequestApprovals({
         </TableContainer>
       </Box>
       {openGroup && <ApprovalGroupDialog target={openGroup} onClose={() => setOpenGroup(null)} />}
+      {decisionDialog}
     </Card>
   );
 }

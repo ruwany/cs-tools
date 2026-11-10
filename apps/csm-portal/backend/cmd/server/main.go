@@ -695,6 +695,8 @@ func main() {
 	route("POST /change-requests/search", handler.PermViewOperations, changeRequestHandler.SearchChangeRequests)
 	route("POST /change-requests/aggregate", handler.PermViewOperations, changeRequestHandler.AggregateChangeRequests)
 	route("POST /change-requests/link-options", handler.PermViewOperations, changeRequestHandler.GetChangeRequestLinkOptions)
+	// The CAB operations dashboard (Operations > CAB dashboard). Internal callers only at the entity service.
+	route("GET /reports/cab-operations", handler.PermViewOperations, changeRequestHandler.GetCABOperationsReport)
 	route("POST /services/search", handler.PermView, itServiceHandler.SearchITServices)
 	route("POST /service-offerings/search", handler.PermView, serviceOfferingHandler.SearchServiceOfferings)
 	route("POST /groups/search", handler.PermView, groupHandler.SearchGroups)

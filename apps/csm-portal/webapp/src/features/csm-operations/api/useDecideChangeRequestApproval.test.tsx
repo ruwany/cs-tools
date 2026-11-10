@@ -75,6 +75,31 @@ describe("useDecideChangeRequestApproval", () => {
     expect(result.current.data).toEqual({ id: "approval-1", state: "approved" });
   });
 
+  it("sends the approver's comment trimmed, and leaves a blank one out", async () => {
+    postMock.mockResolvedValue({ id: "approval-1", state: "rejected" });
+    const { result } = renderHook(() => useDecideChangeRequestApproval(), {
+      wrapper,
+    });
+
+    act(() => {
+      result.current.mutate({ id: "cr-1", decision: "rejected", comment: "  No rollback plan \n" });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(postMock).toHaveBeenLastCalledWith(
+      "/change-requests/cr-1/approvals/decision",
+      { decision: "rejected", comment: "No rollback plan" },
+    );
+
+    act(() => {
+      result.current.mutate({ id: "cr-1", decision: "approved", comment: "   " });
+    });
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(2));
+    expect(postMock).toHaveBeenLastCalledWith(
+      "/change-requests/cr-1/approvals/decision",
+      { decision: "approved" },
+    );
+  });
+
   it("invalidates the approvals, detail, and list queries for the CR on success", async () => {
     postMock.mockResolvedValue({ id: "approval-1", state: "rejected" });
     const { result } = renderHook(() => useDecideChangeRequestApproval(), {

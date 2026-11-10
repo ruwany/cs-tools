@@ -605,6 +605,16 @@ func (c *CustomerEntityClient) DecideChangeRequestApproval(ctx context.Context, 
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/change-requests/%s/approvals/decision", url.PathEscape(id)), body)
 }
 
+// GetCABOperationsReport calls GET /reports/cab-operations on the entity
+// service with the given query (from / to). Response is returned as raw JSON.
+func (c *CustomerEntityClient) GetCABOperationsReport(ctx context.Context, query url.Values) ([]byte, error) {
+	path := "/reports/cab-operations"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	return c.do(ctx, http.MethodGet, path, nil)
+}
+
 // SearchTimeCards calls POST /time-cards/search on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {

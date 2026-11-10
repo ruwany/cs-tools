@@ -5975,7 +5975,17 @@ type ChangeRequestApprovalDecisionRequest struct {
 	// Decision is the caller's decision on their own pending approval
 	// ("approved" or "rejected").
 	Decision string `json:"decision"`
+	// Comment is optional: what the approver says with the decision (a CAB
+	// member's reason for rejecting, or what they want done before the change
+	// goes ahead). Trimmed; blank is no comment; at most
+	// MaxChangeRequestApprovalCommentRunes characters. It is stored on the
+	// approver's own approval_stage_approver row (comments), where the
+	// approvals list and the CAB operations report read it.
+	Comment *string `json:"comment,omitempty"`
 }
+
+// MaxChangeRequestApprovalCommentRunes caps ChangeRequestApprovalDecisionRequest.Comment.
+const MaxChangeRequestApprovalCommentRunes = 4000
 
 // ChangeRequestApprovalDecisionResponse is the response for
 // POST /change-requests/{id}/approvals/decision.

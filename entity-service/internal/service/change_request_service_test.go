@@ -40,8 +40,10 @@ type stubChangeRequestRepo struct {
 	getChangeRequestByID              func(ctx context.Context, id string) (domain.ChangeRequest, error)
 	getChangeRequestApprovals         func(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
 	decideChangeRequestApproval       func(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error)
-	validateChangeRequestLinks        func(ctx context.Context, sel domain.ChangeRequestLinkSelection) (domain.ChangeRequestLinkSet, error)
-	getChangeRequestLinkOptions       func(ctx context.Context, req domain.ChangeRequestLinkOptionsRequest) (domain.ChangeRequestLinkOptionsResponse, error)
+	// decideComment is the comment the last DecideChangeRequestApproval call got.
+	decideComment               string
+	validateChangeRequestLinks  func(ctx context.Context, sel domain.ChangeRequestLinkSelection) (domain.ChangeRequestLinkSet, error)
+	getChangeRequestLinkOptions func(ctx context.Context, req domain.ChangeRequestLinkOptionsRequest) (domain.ChangeRequestLinkOptionsResponse, error)
 }
 
 // ValidateChangeRequestLinks defaults to accepting everything: most tests do
@@ -67,7 +69,8 @@ func (s *stubChangeRequestRepo) GetChangeRequestApprovals(ctx context.Context, i
 	panic("not implemented")
 }
 
-func (s *stubChangeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error) {
+func (s *stubChangeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail, comment string) (string, error) {
+	s.decideComment = comment
 	if s.decideChangeRequestApproval != nil {
 		return s.decideChangeRequestApproval(ctx, id, approverUserID, decision, actorEmail)
 	}
@@ -119,7 +122,7 @@ type stubMirrorChangeRequestService struct {
 	decideChangeRequestApproval func(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error)
 }
 
-func (s *stubMirrorChangeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error) {
+func (s *stubMirrorChangeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision, _ string) (domain.ChangeRequestApprovalDecisionResponse, error) {
 	return s.decideChangeRequestApproval(ctx, id, decision)
 }
 
@@ -457,7 +460,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_RejectsInvalidDecision
 	repo := &stubChangeRequestRepo{}
 	svc := NewChangeRequestService(repo, stubUserRepo{})
 
-	_, err := svc.DecideChangeRequestApproval(context.Background(), testUUID, "maybe")
+	_, err := svc.DecideChangeRequestApproval(context.Background(), testUUID, "maybe", "")
 	var ve *apierror.ValidationError
 	if !asValidationError(err, &ve) {
 		t.Fatalf("expected *apierror.ValidationError for decision=%q, got %T: %v", "maybe", err, err)
@@ -471,11 +474,55 @@ func TestChangeRequestService_DecideChangeRequestApproval_RequiresUserIDToken(t 
 	repo := &stubChangeRequestRepo{}
 	svc := NewChangeRequestService(repo, stubUserRepo{})
 
-	_, err := svc.DecideChangeRequestApproval(context.Background(), testUUID, "approved")
+	_, err := svc.DecideChangeRequestApproval(context.Background(), testUUID, "approved", "")
 	var ue *apierror.UnauthorizedError
 	if !errors.As(err, &ue) {
 		t.Fatalf("expected *apierror.UnauthorizedError with no x-user-id-token, got %T: %v", err, err)
 	}
+}
+
+// TestChangeRequestService_DecideChangeRequestApproval_Comment: the comment is
+// trimmed before it reaches the repository, a blank one reaches it as "" (no
+// comment), and one over the cap is refused with a 400 before the repository
+// is reached.
+func TestChangeRequestService_DecideChangeRequestApproval_Comment(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	newSvc := func(repo *stubChangeRequestRepo) ChangeRequestService {
+		return NewChangeRequestService(repo, stubUserRepo{
+			getUserByEmail: func(context.Context, string) (domain.User, error) {
+				return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+			},
+		})
+	}
+	for _, tc := range []struct{ name, in, want string }{
+		{"trimmed", "  add the rollback steps \n", "add the rollback steps"},
+		{"blank is none", " \t ", ""},
+		{"none", "", ""},
+		{"at the cap", strings.Repeat("é", domain.MaxChangeRequestApprovalCommentRunes), strings.Repeat("é", domain.MaxChangeRequestApprovalCommentRunes)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &stubChangeRequestRepo{
+				decideChangeRequestApproval: func(context.Context, string, string, string, string) (string, error) {
+					return "approval-record-id", nil
+				},
+			}
+			if _, err := newSvc(repo).DecideChangeRequestApproval(ctx, testUUID, "rejected", tc.in); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if repo.decideComment != tc.want {
+				t.Fatalf("repo got comment %q, want %q", repo.decideComment, tc.want)
+			}
+		})
+	}
+	t.Run("over the cap", func(t *testing.T) {
+		repo := &stubChangeRequestRepo{}
+		_, err := newSvc(repo).DecideChangeRequestApproval(ctx, testUUID, "approved",
+			strings.Repeat("a", domain.MaxChangeRequestApprovalCommentRunes+1))
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
 }
 
 // TestChangeRequestService_DecideChangeRequestApproval_NoWritebackWhenSnWritebackNil
@@ -506,7 +553,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_NoWritebackWhenSnWrite
 		},
 	})
 
-	resp, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved")
+	resp, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -540,7 +587,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_NonMemberRefusalPropag
 		},
 	}, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
 
-	_, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved")
+	_, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved", "")
 	var fe *apierror.ForbiddenError
 	if !errors.As(err, &fe) || fe.Msg != msg {
 		t.Fatalf("err = %v, want the repository's ForbiddenError %q", err, msg)
@@ -583,7 +630,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_ExternalUserRefusalPro
 	}, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
 
 	for _, decision := range []string{"approved", "rejected"} {
-		_, err := svc.DecideChangeRequestApproval(ctx, testUUID, decision)
+		_, err := svc.DecideChangeRequestApproval(ctx, testUUID, decision, "")
 		var fe *apierror.ForbiddenError
 		if !errors.As(err, &fe) || fe.Msg != msg {
 			t.Fatalf("%s: err = %v, want the repository's ForbiddenError %q", decision, err, msg)
@@ -624,7 +671,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_MirrorsToServiceNow(t 
 		},
 	}, mirror, dispatcher)
 
-	if _, err := svc.DecideChangeRequestApproval(ctx, testUUID, "rejected"); err != nil {
+	if _, err := svc.DecideChangeRequestApproval(ctx, testUUID, "rejected", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -667,7 +714,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_MirrorFailureRecordsWr
 		},
 	}, mirror, dispatcher)
 
-	if _, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved"); err != nil {
+	if _, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved", ""); err != nil {
 		t.Fatalf("expected the Postgres-side success to be reported despite the mirror failure, got %v", err)
 	}
 
@@ -698,7 +745,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_RepoNotFoundPropagates
 		},
 	}, mirror, dispatcher)
 
-	_, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved")
+	_, err := svc.DecideChangeRequestApproval(ctx, testUUID, "approved", "")
 	var nfe *apierror.NotFoundError
 	if !errors.As(err, &nfe) {
 		t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)

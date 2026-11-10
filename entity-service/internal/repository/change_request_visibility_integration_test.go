@@ -223,7 +223,7 @@ func (f *crFlow) wantHiddenWrites(r visRepos, who persona, id, userID, when stri
 		f.wantNotFound(fmt.Sprintf("%s: PATCH (%s) as %s", when, tc.name, who.name), err)
 	}
 	for _, decision := range []string{"approved", "rejected"} {
-		_, err := r.cr.DecideChangeRequestApproval(who.ctx, id, userID, decision, email)
+		_, err := r.cr.DecideChangeRequestApproval(who.ctx, id, userID, decision, email, "")
 		f.wantNotFound(fmt.Sprintf("%s: decision %s as %s", when, decision, who.name), err)
 	}
 	_, err := r.comments.CreateComment(who.ctx, id, domain.ReferenceTypeChangeRequest, "COMMENT", "a comment on a change request I cannot see", email)
@@ -624,7 +624,7 @@ func TestChangeRequestVisibilityIntegration_LegacyInFlightGetsItsStage(t *testin
 
 	t.Run("the decision route does the same", func(t *testing.T) {
 		f, id := newStageless(t, "CUSTOMER_APPROVAL")
-		if _, err := f.repo.DecideChangeRequestApproval(asContact(crScopeUserA2), id, crScopeUserA2, "approved", crFlowEmail(crScopeUserA2)); err != nil {
+		if _, err := f.repo.DecideChangeRequestApproval(asContact(crScopeUserA2), id, crScopeUserA2, "approved", crFlowEmail(crScopeUserA2), ""); err != nil {
 			t.Fatalf("decision: %v", err)
 		}
 		f.expect(id, "after the decision", "SCHEDULED", "implement", "canceled")

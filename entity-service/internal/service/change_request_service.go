@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
@@ -864,7 +865,12 @@ func (s *changeRequestService) withApprovalViewer(ctx context.Context) context.C
 // PatchChangeRequest already accepts (a mirror failure leaves ServiceNow's
 // row stale until sn_writeback_failures is backfilled) rather than take on
 // that larger, harder-to-scope risk.
-func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error) {
+//
+// comment is trimmed and stored on the decided approver row; blank is none,
+// longer than domain.MaxChangeRequestApprovalCommentRunes is a 400. It is
+// optional for both decisions here: the CSM webapp asks for one on a rejection,
+// but the customer portal decides the customer stages without one.
+func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, id, decision, comment string) (domain.ChangeRequestApprovalDecisionResponse, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ChangeRequestApprovalDecisionResponse{}, err
 	}
@@ -878,13 +884,18 @@ func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, 
 	if !changeRequestApprovalDecisions[decision] {
 		return domain.ChangeRequestApprovalDecisionResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid decision %q", decision)}
 	}
+	comment = strings.TrimSpace(comment)
+	if utf8.RuneCountInString(comment) > domain.MaxChangeRequestApprovalCommentRunes {
+		return domain.ChangeRequestApprovalDecisionResponse{}, &apierror.ValidationError{
+			Msg: fmt.Sprintf("comment must be at most %d characters", domain.MaxChangeRequestApprovalCommentRunes)}
+	}
 
 	user, err := s.currentUser(ctx)
 	if err != nil {
 		return domain.ChangeRequestApprovalDecisionResponse{}, err
 	}
 
-	approvalID, err := s.repo.DecideChangeRequestApproval(ctx, id, user.ID, decision, user.Email)
+	approvalID, err := s.repo.DecideChangeRequestApproval(ctx, id, user.ID, decision, user.Email, comment)
 	if err != nil {
 		return domain.ChangeRequestApprovalDecisionResponse{}, err
 	}
@@ -902,7 +913,7 @@ func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, 
 		mirrorID, mirrorDecision := id, decision
 		s.snWriteback.Dispatch(ctx, "change_request", id, "approval_decision", decision,
 			func(writeCtx context.Context) error {
-				_, err := s.snMirror.DecideChangeRequestApproval(writeCtx, mirrorID, mirrorDecision)
+				_, err := s.snMirror.DecideChangeRequestApproval(writeCtx, mirrorID, mirrorDecision, "")
 				return err
 			},
 		)

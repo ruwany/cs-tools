@@ -337,9 +337,10 @@ test.describe("change request lifecycle — approve cascades to Authorize", () =
       const approveButton = detail.approveButton(ALICE, PEER);
       await expect(approveButton).toBeVisible();
 
+      await approveButton.click();
       const [response] = await Promise.all([
         page.waitForResponse((r) => /\/change-requests\/[^/]+\/approvals?/.test(r.url()), { timeout: 15_000 }),
-        approveButton.click(),
+        detail.decisionDialog("approve").getByRole("button", { name: "Approve", exact: true }).click(),
       ]);
       expect(response.ok(), `Approve decision failed (${response.status()})`).toBeTruthy();
 
@@ -357,7 +358,7 @@ test.describe("change request lifecycle — approve cascades to Authorize", () =
       await expect(detail.scheduleButton()).toHaveCount(0);
 
       // ...and CAB approval by another internal user schedules it.
-      await detail.approveButton(ALICE, "CAB Approval").click();
+      await detail.approve(ALICE, "CAB Approval");
       await expect(detail.approverStatus(ALICE, "CAB Approval")).toHaveText("Approved");
       await expect(detail.currentStep()).toContainText("Scheduled");
     });
@@ -618,9 +619,9 @@ test.describe("change request lifecycle — a Review approver's controls follow 
     await asPersona(browser, "crInternalApprover", async (alice) => {
       const detail = new ChangeRequestDetailPage(alice);
       await detail.goto(CR_WITH_TEAM);
-      await detail.approveButton(ALICE, "Peer Approval").click();
+      await detail.approve(ALICE, "Peer Approval");
       await expect(detail.currentStep()).toContainText("Authorize");
-      await detail.approveButton(ALICE, "CAB Approval").click();
+      await detail.approve(ALICE, "CAB Approval");
       await expect(detail.currentStep()).toContainText("Scheduled");
       await alice.getByRole("button", { name: "Start implementation" }).click();
       await expect(detail.currentStep()).toContainText("Implement");

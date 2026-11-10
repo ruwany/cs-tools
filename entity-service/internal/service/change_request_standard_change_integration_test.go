@@ -170,7 +170,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), pending.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = crs.DecideChangeRequestApproval(crCtx(t, stdCAB1), pending.ID, "rejected")
+	_, err = crs.DecideChangeRequestApproval(crCtx(t, stdCAB1), pending.ID, "rejected", "")
 	expectErr[*apierror.NotFoundError](t, err, "decide a proposal through the change request route")
 	_, err = crs.GetChangeRequestApprovals(crCtx(t, stdCAB1), pending.ID)
 	expectErr[*apierror.NotFoundError](t, err, "read a proposal's approvals through the change request route")

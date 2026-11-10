@@ -576,6 +576,8 @@ interface Approver {
   id: string;
   name: string;
   status: string;
+  /** The comment the approver gave with their decision (the decision route's optional `comment`). */
+  comments?: string;
 }
 interface Stage {
   stage: string;
@@ -634,7 +636,7 @@ export interface FakeChangeRequestApi {
   /** The planned window as the fake holds it ("YYYY-MM-DD HH:MM:SS", UTC). */
   planned(): { start: string; end: string };
   /** The approval stages as the fake holds them (stage name -> status). */
-  stages(): Array<{ stage: string; status: string; approvers: Array<{ name: string; status: string }> }>;
+  stages(): Array<{ stage: string; status: string; approvers: Array<{ name: string; status: string; comments?: string }> }>;
   /** The change request's tags as the fake holds them (labels, by label). */
   tags(): string[];
   /**
@@ -1723,7 +1725,7 @@ export async function installFakeChangeRequestApi(
       record(route, `${req.method()} ${path}`);
 
       if (path.endsWith("/approvals/decision") && req.method() === "POST") {
-        const { decision } = req.postDataJSON() as { decision: "approved" | "rejected" };
+        const { decision, comment } = req.postDataJSON() as { decision: "approved" | "rejected"; comment?: string };
         // The caller's pending stage: their row on a stage decidable in the CR's
         // current state, else (all of theirs are stale) the first one. The customer
         // stages are not the CSM portal's to decide (see customerDecides).
@@ -1759,6 +1761,8 @@ export async function installFakeChangeRequestApi(
           );
         }
         row.status = decision === "approved" ? "APPROVED" : "REJECTED";
+        // Like the backend: the comment, trimmed, is stored on the approver's own row; blank is none.
+        if (comment?.trim()) row.comments = comment.trim();
         current.status = row.status;
         // Like the backend, a resolving decision cancels the stage's other pending approvers.
         for (const a of current.approvers) if (a !== row && a.status === "REQUESTED") a.status = "CANCELLED";
@@ -2039,7 +2043,7 @@ export async function installFakeChangeRequestApi(
       stages.map((st) => ({
         stage: st.stage,
         status: st.status,
-        approvers: st.approvers.map((a) => ({ name: a.name, status: a.status })),
+        approvers: st.approvers.map((a) => ({ name: a.name, status: a.status, ...(a.comments ? { comments: a.comments } : {}) })),
       })),
     tags: () => [...tags].sort((a, b) => a.label.localeCompare(b.label)).map((t) => t.label),
     seedTags: (labels) => {

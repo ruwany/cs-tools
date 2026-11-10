@@ -721,6 +721,25 @@ service) adds no key, and `mapUpstreamErrorGeneric` (every other endpoint) never
 echoes the message. The CSM webapp does not branch on it today (it keys on the 409 status); it is
 there for the next client that has to. Pinned by `TestUpstreamErrorCodesPassThrough`.
 
+## A comment with a change request approval decision, and the CAB operations report
+
+`POST /change-requests/{id}/approvals/decision` accepts `{decision, comment?}` (still strict: any other key
+is a 400). `comment` is optional; one longer than 4000 characters once trimmed
+(`maxApprovalDecisionCommentRunes`, the entity service's cap) is refused here with "The comment can be at
+most 4000 characters." and nothing is sent; otherwise the body goes upstream untouched and the entity
+service trims it and stores it on the approver's own row (shown back as the approver's `comments`). The
+CSM webapp asks for one on a rejection; the API does not require it.
+
+`GET /reports/cab-operations?from=YYYY-MM-DD&to=YYYY-MM-DD` (`ChangeRequestHandler.GetCABOperationsReport`,
+`PermViewOperations`) serves the Operations CAB dashboard: the entity service's report, passed through as
+raw JSON with `Cache-Control: no-store` (the entity route is internal callers only). Only `from` and `to`
+are forwarded, each only when non-blank; a value that is not a date is a 400 here with no upstream call,
+and the entity service's own 400 (from after to, more than 24 months) is passed on with its message
+(`upstreamErrorMessageStrict`); anything else maps through `mapUpstreamErrorGeneric`. Shapes: the
+`CABOperationsReport` schemas in `openapi.yaml`, the same as the entity service's. Tests:
+`TestDecideChangeRequestApproval` ("forwards a comment", "rejects a comment over 4000 characters"),
+`TestGetCABOperationsReport`.
+
 ## Opening an approval stage's assignment group (`GET /groups/{id}`)
 
 `GET /change-requests/{id}/approvals` now carries `assignmentGroup: {id, name}` on

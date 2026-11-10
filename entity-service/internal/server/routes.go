@@ -374,6 +374,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var longOpenCaseReportHandler *handler.LongOpenCaseReportHandler
+	var cabOperationsReportHandler *handler.CABOperationsReportHandler
 	var runbookHandler *handler.RunbookHandler
 	// standardChangeHandler serves the standard change catalogue and its proposals
 	// (migration 0252); Postgres only. standardChangeRepo is also what the change
@@ -1700,6 +1701,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						OpenBeforeYesterdayProductProjectTypes: cfg.OpenBeforeYesterdayReportProductProjectTypes,
 					}))
 		}
+		// CAB operations report: what the CAB was asked and how it decided, for
+		// the Operations dashboard. It reads the Postgres change request and
+		// approval tables only, so like the long-open cases report it is not
+		// offered when change requests are served from the other data source.
+		if cfg.DataSource != config.DataSourceServiceNow {
+			cabOperationsReportHandler = handler.NewCABOperationsReportHandler(
+				service.NewCABOperationsReportService(
+					repository.NewCABOperationsReportRepository(repository.NewScoped(db)), accessSvc))
+		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
@@ -2253,6 +2263,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	if cabOperationsReportHandler != nil {
+		// internalOnly: the report names customers, their change requests,
+		// the engineers who raised them and the CAB members who decided them;
+		// a customer token must never reach it.
+		mux.HandleFunc("GET /reports/cab-operations", internalOnly(accessSvc, cabOperationsReportHandler.GetCABOperationsReport))
 	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.

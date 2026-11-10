@@ -1145,8 +1145,11 @@ type ChangeRequestService interface {
 
 	// DecideChangeRequestApproval submits the caller's decision ("approved" or
 	// "rejected") on their own pending approval for a change request identified
-	// by UUID. Supported by the ServiceNow data source only.
-	DecideChangeRequestApproval(ctx context.Context, id, decision string) (domain.ChangeRequestApprovalDecisionResponse, error)
+	// by UUID, with an optional comment ("" for none; trimmed, at most
+	// domain.MaxChangeRequestApprovalCommentRunes characters). The Postgres data
+	// source stores the comment on the approver's row; the ServiceNow one does not
+	// forward it (its decision API takes the decision only).
+	DecideChangeRequestApproval(ctx context.Context, id, decision, comment string) (domain.ChangeRequestApprovalDecisionResponse, error)
 }
 
 // TimeCardService defines the operations available on the time-cards entity.

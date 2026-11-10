@@ -13388,6 +13388,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/cab-operations:
+    get:
+      summary: >-
+        Build the CAB operations report: what the CAB was asked to decide over a period
+        and how it decided. Read-only. Internal callers only.
+      description: >-
+        A change request is in the report when its latest CAB stage was created in the
+        period ("asked on", the day the CAB was asked; the database records no CAB
+        meeting), and counts once, in that stage's day, week and month (UTC). A stage is
+        the CAB's by the rule the change request's approvals list uses: one labelled CAB
+        Approval (or the older Authorize / ECAB Approval); for a stage copied from
+        ServiceNow (no label), an Emergency change's stage in the "CAB Approval" group,
+        else the change's second stage. A standard change proposal's stages are never
+        counted. The outcome is the latest CAB stage's: one rejection rejects it, else one
+        approval approves it; undecided, it is PENDING while the change waits in
+        authorize and CANCELLED otherwise. The approver workload and the pushback cover
+        every CAB stage of each change request, so a rejection before a resubmission is
+        listed. Comments are plain text. Postgres data sources only (not registered with
+        DATA_SOURCE=servicenow).
+      operationId: getCABOperationsReport
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: {type: string, format: date}
+          description: First day, inclusive. Default the first day of the month three months before to's.
+        - name: to
+          in: query
+          required: false
+          schema: {type: string, format: date}
+          description: Last day, inclusive. Default today (UTC).
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CABOperationsReport'
+        "400":
+          description: A date is not YYYY-MM-DD, from is after to, or the period covers more than 24 calendar months.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/long-open-cases:
     get:
       summary: >-
@@ -28679,6 +28741,335 @@ components:
           type: string
           enum: [approved, rejected]
           description: Caller's decision on their own pending approval.
+        comment:
+          type: string
+          maxLength: 4000
+          description: >-
+            Optional. What the approver says with the decision (a CAB member's reason for
+            rejecting, or what they want done first). Trimmed; blank is none; at most 4000
+            characters (400 otherwise). Stored on the approver's own row and returned as
+            the approver's comments by GET /change-requests/{id}/approvals; a decision
+            without one leaves any earlier comment as it was. Not forwarded with
+            DATA_SOURCE=servicenow. Optional for both decisions here (the CSM portal asks
+            for one on a rejection).
+
+
+    CABOperationsModelCounts:
+      type: object
+      description: Change requests by change model (anything other than normal, standard or emergency is other).
+      required: [normal, standard, emergency, other]
+      properties:
+        normal: {type: integer}
+        standard: {type: integer}
+        emergency: {type: integer}
+        other: {type: integer}
+
+    CABOperationsCounts:
+      type: object
+      required: [total, approved, rejected, pending, cancelled, approvalRate, prod, outageDeclared, byModel]
+      properties:
+        total: {type: integer}
+        approved: {type: integer}
+        rejected: {type: integer}
+        pending:
+          type: integer
+          description: Undecided and still waiting for the CAB (state authorize).
+        cancelled:
+          type: integer
+          description: Undecided and no longer waiting for the CAB.
+        approvalRate:
+          type: number
+          nullable: true
+          description: approved / (approved + rejected), 0 to 1; null when the CAB decided none.
+        prod:
+          type: integer
+          description: With a primary production deployment (its own, or any linked one).
+        outageDeclared:
+          type: integer
+          description: With the "Service outage / downtime" field filled in. Full vs partial is not recorded.
+        byModel:
+          $ref: '#/components/schemas/CABOperationsModelCounts'
+
+    CABOperationsNamedCount:
+      type: object
+      required: [id, name, count]
+      properties:
+        id:
+          type: string
+          nullable: true
+          description: The assignment group id; null for change requests with none.
+        name: {type: string}
+        count: {type: integer}
+
+    CABOperationsTeamRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, nullable: true}
+        name: {type: string}
+
+    CABOperationsMonth:
+      allOf:
+        - $ref: '#/components/schemas/CABOperationsCounts'
+        - type: object
+          required: [month, ongoing, topTeams]
+          properties:
+            month:
+              type: string
+              example: "2026-11"
+            ongoing:
+              type: boolean
+              description: The current month; its figures are so far only.
+            topTeams:
+              type: array
+              description: The month's three busiest assignment groups.
+              items: {$ref: '#/components/schemas/CABOperationsNamedCount'}
+
+    CABOperationsDay:
+      type: object
+      required: [day, total, approved, rejected, prod, outageDeclared, standard, emergency]
+      properties:
+        day: {type: string, format: date}
+        total: {type: integer}
+        approved: {type: integer}
+        rejected: {type: integer}
+        prod: {type: integer}
+        outageDeclared: {type: integer}
+        standard: {type: integer}
+        emergency: {type: integer}
+
+    CABOperationsWeek:
+      type: object
+      required: [weekStart, total, byModel, byTeam, otherTeams]
+      properties:
+        weekStart:
+          type: string
+          format: date
+          description: The Monday of the ISO week.
+        total: {type: integer}
+        byModel: {$ref: '#/components/schemas/CABOperationsModelCounts'}
+        byTeam:
+          type: array
+          description: One entry per weeklyTeams team, in that order.
+          items: {$ref: '#/components/schemas/CABOperationsNamedCount'}
+        otherTeams:
+          type: integer
+          description: Change requests of every other team (no team included).
+
+    CABOperationsCustomer:
+      type: object
+      required: [accountId, name, total, approved, rejected, standard, emergency]
+      properties:
+        accountId: {type: string, nullable: true}
+        name: {type: string}
+        total: {type: integer}
+        approved: {type: integer}
+        rejected: {type: integer}
+        standard: {type: integer}
+        emergency: {type: integer}
+
+    CABOperationsTeam:
+      type: object
+      description: One assignment group. The database records no delivery stream, so the team stands in for one.
+      required: [groupId, name, total, approved, rejected, approvalRate, outageDeclared, standard, emergency]
+      properties:
+        groupId: {type: string, nullable: true}
+        name: {type: string}
+        total: {type: integer}
+        approved: {type: integer}
+        rejected: {type: integer}
+        approvalRate: {type: number, nullable: true}
+        outageDeclared: {type: integer}
+        standard: {type: integer}
+        emergency: {type: integer}
+
+    CABOperationsApprover:
+      type: object
+      description: A CAB member's decisions on every CAB stage of the period's change requests.
+      required: [userId, name, email, decisions, approved, rejected, comments]
+      properties:
+        userId: {type: string, nullable: true}
+        name: {type: string}
+        email: {type: string}
+        decisions: {type: integer}
+        approved: {type: integer}
+        rejected: {type: integer}
+        comments:
+          type: integer
+          description: Non-blank comments.
+
+    CABOperationsRequester:
+      type: object
+      required: [userId, name, total]
+      properties:
+        userId: {type: string}
+        name: {type: string}
+        total: {type: integer}
+
+    CABOperationsQueueItem:
+      type: object
+      required: [id, number, subject, accountName, model, environment, plannedStart, outageDeclared, askedOn, approvers]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        accountName: {type: string}
+        model:
+          type: string
+          enum: [normal, standard, emergency, other]
+        environment:
+          type: string
+          description: The deployment type (PRIMARY_PRODUCTION when any deployment is one); empty when none.
+        plannedStart: {type: string, format: date-time, nullable: true}
+        outageDeclared: {type: boolean}
+        askedOn:
+          type: string
+          format: date-time
+          description: When the CAB was asked (the CAB stage was created).
+        approvers:
+          type: array
+          description: The CAB members still asked.
+          items: {type: string}
+
+    CABOperationsRegistryItem:
+      type: object
+      required: [id, number, subject, state, accountName, model, environment, assignmentGroup, requestedBy,
+                 outageDeclared, outageSummary, outcome, decidedBy, decidedOn, cabComment, askedOn, plannedStart]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        state:
+          type: string
+          description: change_request.state, upper case.
+        accountName: {type: string}
+        model:
+          type: string
+          enum: [normal, standard, emergency, other]
+        environment: {type: string}
+        assignmentGroup: {type: string}
+        requestedBy: {type: string}
+        outageDeclared: {type: boolean}
+        outageSummary:
+          type: string
+          description: The declared outage as plain text, at most 300 characters; empty when none.
+        outcome:
+          type: string
+          enum: [APPROVED, REJECTED, PENDING, CANCELLED]
+          description: >-
+            The latest CAB stage's: one rejection rejects it, else one approval approves it; undecided
+            it is PENDING while the change is in authorize, CANCELLED otherwise.
+        decidedBy:
+          type: string
+          description: The rejecting member, or the first to approve; empty when undecided.
+        decidedOn: {type: string, format: date-time, nullable: true}
+        cabComment:
+          type: string
+          description: The latest non-blank comment on any of its CAB stages, as plain text.
+        askedOn: {type: string, format: date-time}
+        plannedStart: {type: string, format: date-time, nullable: true}
+
+    CABOperationsPushbackItem:
+      type: object
+      required: [changeRequestId, number, subject, accountName, kind, decision, approverName, comment, decidedOn]
+      properties:
+        changeRequestId: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        accountName: {type: string}
+        kind:
+          type: string
+          enum: [REJECTION, COMMENT]
+          description: A rejection (with or without a comment), or a comment on any other decision.
+        decision:
+          type: string
+          description: The approver row's state (APPROVED, REJECTED, ...).
+        approverName: {type: string}
+        comment:
+          type: string
+          description: Plain text; empty for a rejection without one.
+        decidedOn: {type: string, format: date-time}
+
+    CABOperationsMember:
+      type: object
+      required: [userId, name, email]
+      properties:
+        userId: {type: string, format: uuid}
+        name: {type: string}
+        email: {type: string}
+
+    CABOperationsReport:
+      type: object
+      required: [from, to, generatedOn, currentMonth, totals, months, daily, weeklyTeams, weekly, customers, teams,
+                 approvers, requesters, queue, registry, registryTotal, truncated, pushback, pushbackTotal, cabMembers]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        generatedOn: {type: string, format: date-time}
+        currentMonth:
+          type: string
+          description: The month of generatedOn (YYYY-MM), the ongoing one.
+        totals:
+          allOf:
+            - $ref: '#/components/schemas/CABOperationsCounts'
+            - type: object
+              required: [approvers]
+              properties:
+                approvers:
+                  type: integer
+                  description: How many different CAB members decided at least once.
+        months:
+          type: array
+          description: Every calendar month of the period.
+          items: {$ref: '#/components/schemas/CABOperationsMonth'}
+        daily:
+          type: array
+          description: Every day of the period, zero or not.
+          items: {$ref: '#/components/schemas/CABOperationsDay'}
+        weeklyTeams:
+          type: array
+          description: The period's five busiest teams, as broken out in weekly.
+          items: {$ref: '#/components/schemas/CABOperationsTeamRef'}
+        weekly:
+          type: array
+          items: {$ref: '#/components/schemas/CABOperationsWeek'}
+        customers:
+          type: array
+          description: Highest total first.
+          items: {$ref: '#/components/schemas/CABOperationsCustomer'}
+        teams:
+          type: array
+          description: Highest total first.
+          items: {$ref: '#/components/schemas/CABOperationsTeam'}
+        approvers:
+          type: array
+          description: Most decisions first.
+          items: {$ref: '#/components/schemas/CABOperationsApprover'}
+        requesters:
+          type: array
+          description: The ten who raised the most.
+          items: {$ref: '#/components/schemas/CABOperationsRequester'}
+        queue:
+          type: array
+          description: Waiting for the CAB, oldest asked first.
+          items: {$ref: '#/components/schemas/CABOperationsQueueItem'}
+        registry:
+          type: array
+          description: Every change request of the period, newest asked first, at most 2000.
+          items: {$ref: '#/components/schemas/CABOperationsRegistryItem'}
+        registryTotal: {type: integer}
+        truncated:
+          type: boolean
+          description: The registry was cut at 2000 rows.
+        pushback:
+          type: array
+          description: CAB rejections and non-blank CAB comments, newest first, at most 200.
+          items: {$ref: '#/components/schemas/CABOperationsPushbackItem'}
+        pushbackTotal: {type: integer}
+        cabMembers:
+          type: array
+          description: The "CAB Approval" group's members who may decide (active internal users).
+          items: {$ref: '#/components/schemas/CABOperationsMember'}
 
     ChangeRequestApprovalDecisionResponse:
       type: object

@@ -25,18 +25,28 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
 // changeRequestApprovalDecisionPayload is the strict shape accepted by
-// DecideChangeRequestApproval: exactly one field, and Decision must be
-// "approved" or "rejected".
+// DecideChangeRequestApproval: Decision must be "approved" or "rejected";
+// Comment is optional (what the approver says with it, at most
+// maxApprovalDecisionCommentRunes characters once trimmed; the entity service
+// trims it and stores it on the approver's row). Nothing else is accepted.
 type changeRequestApprovalDecisionPayload struct {
-	Decision string `json:"decision"`
+	Decision string  `json:"decision"`
+	Comment  *string `json:"comment,omitempty"`
 }
+
+// maxApprovalDecisionCommentRunes mirrors the entity service's cap on a
+// decision comment, so an over-long one gets a readable 400 here.
+const maxApprovalDecisionCommentRunes = 4000
 
 // entityChangeRequestClient abstracts the entity service change-request operations.
 type entityChangeRequestClient interface {
@@ -50,6 +60,7 @@ type entityChangeRequestClient interface {
 	CreateComment(ctx context.Context, body []byte) ([]byte, error)
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error)
+	GetCABOperationsReport(ctx context.Context, query url.Values) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -717,6 +728,10 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+	if payload.Comment != nil && utf8.RuneCountInString(strings.TrimSpace(*payload.Comment)) > maxApprovalDecisionCommentRunes {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("The comment can be at most %d characters.", maxApprovalDecisionCommentRunes))
+		return
+	}
 
 	result, err := h.entity.DecideChangeRequestApproval(r.Context(), id, body)
 	if err != nil {
@@ -725,6 +740,46 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 		return
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetCABOperationsReport handles GET /reports/cab-operations?from=YYYY-MM-DD&to=YYYY-MM-DD:
+// the CAB operations dashboard's figures, passed through from the entity
+// service (internal callers only there; PermViewOperations here). Both dates
+// are optional; a malformed one is refused here, and the entity service's own
+// 400 (from after to, more than 24 months) is passed on with its message.
+func (h *ChangeRequestHandler) GetCABOperationsReport(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	q := url.Values{}
+	for _, name := range []string{"from", "to"} {
+		v := strings.TrimSpace(r.URL.Query().Get(name))
+		if v == "" {
+			continue
+		}
+		if _, err := time.Parse("2006-01-02", v); err != nil {
+			writeError(w, http.StatusBadRequest, "from and to must be dates (YYYY-MM-DD).")
+			return
+		}
+		q.Set(name, v)
+	}
+	result, err := h.entity.GetCABOperationsReport(r.Context(), q)
+	if err != nil {
+		var apiErr *apierror.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+			if msg := upstreamErrorMessageStrict(apiErr.Body, ""); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
+		slog.ErrorContext(r.Context(), "entity GetCABOperationsReport failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to build the CAB operations report.")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, result)
 }
 

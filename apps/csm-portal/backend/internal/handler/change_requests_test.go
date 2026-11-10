@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -507,7 +508,7 @@ func TestDecideChangeRequestApproval(t *testing.T) {
 
 	t.Run("rejects unknown fields", func(t *testing.T) {
 		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(`{"decision":"approved","comment":"lgtm"}`)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(`{"decision":"approved","note":"lgtm"}`)))
 		r.SetPathValue("id", testCRID)
 		w := httptest.NewRecorder()
 		h.DecideChangeRequestApproval(w, r)
@@ -578,6 +579,47 @@ func TestDecideChangeRequestApproval(t *testing.T) {
 		resp := decodeJSON[map[string]any](t, w)
 		if resp["state"] != "approved" {
 			t.Errorf("state = %v, want approved", resp["state"])
+		}
+	})
+
+	t.Run("forwards a comment with the decision", func(t *testing.T) {
+		const reqPayload = `{"decision":"rejected","comment":"No rollback plan for the database step"}`
+		var capturedBody []byte
+		client := &mockEntityChangeRequestClient{
+			decideChangeRequestApprovalFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"rejected"}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(reqPayload)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.DecideChangeRequestApproval(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+	})
+
+	t.Run("rejects a comment over 4000 characters", func(t *testing.T) {
+		called := false
+		client := &mockEntityChangeRequestClient{
+			decideChangeRequestApprovalFn: func(context.Context, string, []byte) ([]byte, error) {
+				called = true
+				return nil, nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		body := `{"decision":"rejected","comment":"` + strings.Repeat("a", maxApprovalDecisionCommentRunes+1) + `"}`
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests/"+testCRID+"/approvals/decision", strings.NewReader(body)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.DecideChangeRequestApproval(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "The comment can be at most 4000 characters.")
+		if called {
+			t.Error("entity service called for an over-long comment")
 		}
 	})
 
@@ -1905,6 +1947,97 @@ func TestChangeRequestBodyGuardsIgnoreTheCaseOfKeys(t *testing.T) {
 		assertStatus(t, w, http.StatusCreated)
 		if !called {
 			t.Fatal("the create never reached the entity service")
+		}
+	})
+}
+
+func TestGetCABOperationsReport(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		w := httptest.NewRecorder()
+		h.GetCABOperationsReport(w, httptest.NewRequest(http.MethodGet, "/reports/cab-operations", nil))
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("passes from and to through", func(t *testing.T) {
+		var got url.Values
+		client := &mockEntityChangeRequestClient{
+			getCABOperationsReportFn: func(_ context.Context, q url.Values) ([]byte, error) {
+				got = q
+				return []byte(`{"from":"2026-10-01","to":"2026-11-10"}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		w := httptest.NewRecorder()
+		h.GetCABOperationsReport(w, withUser(httptest.NewRequest(http.MethodGet, "/reports/cab-operations?from=2026-10-01&to=2026-11-10&extra=1", nil)))
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if got.Get("from") != "2026-10-01" || got.Get("to") != "2026-11-10" || got.Has("extra") {
+			t.Errorf("upstream query %v", got)
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("Cache-Control %q", w.Header().Get("Cache-Control"))
+		}
+	})
+
+	t.Run("no dates sends no query", func(t *testing.T) {
+		var got url.Values
+		client := &mockEntityChangeRequestClient{
+			getCABOperationsReportFn: func(_ context.Context, q url.Values) ([]byte, error) {
+				got = q
+				return []byte(`{}`), nil
+			},
+		}
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).GetCABOperationsReport(w, withUser(httptest.NewRequest(http.MethodGet, "/reports/cab-operations", nil)))
+		assertStatus(t, w, http.StatusOK)
+		if len(got) != 0 {
+			t.Errorf("upstream query %v, want none", got)
+		}
+	})
+
+	t.Run("rejects a malformed date", func(t *testing.T) {
+		called := false
+		client := &mockEntityChangeRequestClient{
+			getCABOperationsReportFn: func(context.Context, url.Values) ([]byte, error) {
+				called = true
+				return nil, nil
+			},
+		}
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).GetCABOperationsReport(w, withUser(httptest.NewRequest(http.MethodGet, "/reports/cab-operations?from=last-month", nil)))
+		assertStatus(t, w, http.StatusBadRequest)
+		if called {
+			t.Error("entity service called for a malformed date")
+		}
+	})
+
+	t.Run("passes the entity service's 400 message on", func(t *testing.T) {
+		client := &mockEntityChangeRequestClient{
+			getCABOperationsReportFn: func(context.Context, url.Values) ([]byte, error) {
+				return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"message":"the period can cover at most 24 calendar months"}`}
+			},
+		}
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).GetCABOperationsReport(w, withUser(httptest.NewRequest(http.MethodGet, "/reports/cab-operations?from=2020-01-01", nil)))
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "the period can cover at most 24 calendar months")
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to build the CAB operations report.") {
+			if tc.name == "apierror 400 JSON envelope body is not echoed" {
+				continue // this route passes the entity service's 400 message on (above)
+			}
+			t.Run(tc.name, func(t *testing.T) {
+				client := &mockEntityChangeRequestClient{
+					getCABOperationsReportFn: func(context.Context, url.Values) ([]byte, error) { return nil, tc.err },
+				}
+				w := httptest.NewRecorder()
+				NewChangeRequestHandler(client).GetCABOperationsReport(w, withUser(httptest.NewRequest(http.MethodGet, "/reports/cab-operations", nil)))
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
 		}
 	})
 }

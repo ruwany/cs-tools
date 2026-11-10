@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
@@ -940,6 +941,7 @@ type mockEntityChangeRequestClient struct {
 	createCommentFn               func(ctx context.Context, body []byte) ([]byte, error)
 	searchCommentsFn              func(ctx context.Context, body []byte) ([]byte, error)
 	decideChangeRequestApprovalFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	getCABOperationsReportFn      func(ctx context.Context, query url.Values) ([]byte, error)
 }
 
 func (m *mockEntityChangeRequestClient) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
@@ -1010,6 +1012,13 @@ func (m *mockEntityChangeRequestClient) DecideChangeRequestApproval(ctx context.
 		return m.decideChangeRequestApprovalFn(ctx, id, body)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"approved"}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) GetCABOperationsReport(ctx context.Context, query url.Values) ([]byte, error) {
+	if m.getCABOperationsReportFn != nil {
+		return m.getCABOperationsReportFn(ctx, query)
+	}
+	return []byte(`{"from":"2026-08-01","to":"2026-11-10","months":[]}`), nil
 }
 
 // ----- mock entity outage client -----
