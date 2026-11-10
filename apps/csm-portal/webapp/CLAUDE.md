@@ -894,7 +894,11 @@ only at the entity service, `PermViewOperations` at the BFF).
   (one of the report's months, else All) and `view` (the tab; Overview has none). Only `from` / `to` change
   the request; the month chips and the tabs narrow what is shown of the one report, so they cost nothing.
   A changed period keeps the previous report on screen (`keepPreviousData`, a progress bar) until the new
-  one comes. `cabPeriodProblem` refuses a start after the end or more than 24 calendar months **before**
+  one comes. A failed load is an error, never an empty dashboard: a new period that fails has no placeholder
+  (TanStack keeps one while pending only), so it gets `QueryErrorState`; a failed refresh keeps the report
+  under "Could not refresh". A 404 (the entity service does not register the report when change requests
+  are served from the previous system) is `CABReportUnavailableError`: "not available on this deployment",
+  with no retry. `cabPeriodProblem` refuses a start after the end or more than 24 calendar months **before**
   asking (the hook's `enabled: false`), with the backend's own rule. The range uses `DateRangeFilterFields`
   ("CAB asked from/to (UTC)", capped at today). The nav node's `views` name each tab for Recent / Pin
   ("CAB pushback"); `cabOperations.test.ts` keeps them equal to `CAB_DASHBOARD_VIEWS`.
@@ -936,7 +940,7 @@ only at the entity service, `PermViewOperations` at the BFF).
 - Tests: `utils/cabOperations.test.ts` (periods, MoM, part months, sparklines, burn-up, weekly stacks,
   registry filters, summary), `components/cab-dashboard/CabOperationsDashboard.test.tsx` (every tab from
   `test/cabOperationsFixture.ts`, the month filter, the deltas, the ongoing and part months, the registry
-  page after a month change, loading / error / bad period), `api/useGetCABOperationsReport.test.tsx`, `utils/cabOperationsReportPdf.test.ts`. User help:
+  page after a month change, loading / error / not offered (404) / failed refresh / bad period), `api/useGetCABOperationsReport.test.tsx`, `utils/cabOperationsReportPdf.test.ts`. User help:
   `features/help/content/operations.md`, "CAB dashboard".
 
 ## Change request lifecycle stepper

@@ -32,7 +32,7 @@ var richTextBlockElements = map[string]bool{
 }
 
 // RichTextPlainText is the text a reader would see in rich text (HTML the
-// editor writes, ServiceNow's journal HTML, or plain text), as plain text: the
+// editor writes, the previous system's journal HTML, or plain text), as plain text: the
 // value is parsed as IsBlankRichText parses it, every element is removed with
 // its text kept (except the ones whose content DOMPurify drops,
 // richTextDroppedContent), character references are decoded, a block element
@@ -94,7 +94,7 @@ func cutRunes(s string, maxRunes int) string {
 }
 
 // richTextMarkupTag matches an opening or closing tag of an element a rich-text
-// editor writes (ServiceNow's journal HTML, the app's own editor): p, div, br,
+// editor writes (the previous system's journal HTML, the app's own editor): p, div, br,
 // lists, tables, headings and the inline formatting ones.
 var richTextMarkupTag = regexp.MustCompile(
 	`(?i)</?(?:p|div|span|br|hr|ul|ol|li|table|thead|tbody|tr|td|th|b|i|u|s|strong|em|a|h[1-6]|pre|code|blockquote|font|img)(?:\s[^<>]*)?/?>`)
@@ -103,7 +103,7 @@ var richTextMarkupTag = regexp.MustCompile(
 // should see it, "" when blank. The column holds two kinds of text: a comment
 // typed in this portal's decision dialog is plain text and is kept exactly as
 // typed (trimmed), so "Add the <env> name", "List<String>", a quoted "<script>"
-// or a literal "&lt;" survive; a comment copied from ServiceNow may be HTML, and
+// or a literal "&lt;" survive; a comment copied from the previous system may be HTML, and
 // only a value holding an editor's markup (richTextMarkupTag) is read as rich
 // text (RichTextPlainText, blank by IsBlankRichText). A plain comment that
 // happens to contain such a tag ("drop the <b> from the title") is read as

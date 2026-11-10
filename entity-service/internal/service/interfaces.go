@@ -1147,8 +1147,8 @@ type ChangeRequestService interface {
 	// "rejected") on their own pending approval for a change request identified
 	// by UUID, with an optional comment ("" for none; trimmed, at most
 	// domain.MaxChangeRequestApprovalCommentRunes characters). The Postgres data
-	// source stores the comment on the approver's row; the ServiceNow one does not
-	// forward it (its decision API takes the decision only).
+	// source stores the comment on the approver's row; the previous system's data
+	// source does not forward it (its decision API takes the decision only).
 	DecideChangeRequestApproval(ctx context.Context, id, decision, comment string) (domain.ChangeRequestApprovalDecisionResponse, error)
 }
 

@@ -65,7 +65,7 @@ vi.mock("@features/csm-operations/utils/cabOperationsReportPdf", () => ({
 }));
 
 interface QueryStub {
-  data: BeCABOperationsReport | null | undefined;
+  data: BeCABOperationsReport | undefined;
   isPending: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -78,6 +78,11 @@ let queryStub: QueryStub;
 const hookCalls: Array<{ period: { from: string; to: string }; enabled: boolean | undefined }> = [];
 const refetch = vi.fn();
 vi.mock("@features/csm-operations/api/useGetCABOperationsReport", () => ({
+  CABReportUnavailableError: class CABReportUnavailableError extends Error {
+    constructor() {
+      super("The CAB dashboard is not available on this deployment.");
+    }
+  },
   useGetCABOperationsReport: (period: { from: string; to: string }, options: { enabled?: boolean } = {}) => {
     hookCalls.push({ period, enabled: options.enabled });
     return queryStub;
@@ -175,10 +180,29 @@ describe("CabOperationsDashboard — the period and the page's notes", () => {
     expect(refetch).toHaveBeenCalled();
   });
 
-  it("keeps the last report on screen, marked, while a new period loads or after it fails", () => {
+  it("says the report is not offered on this deployment (a 404) as an error, with no retry and no empty dashboard", async () => {
+    const { CABReportUnavailableError } = await import("@features/csm-operations/api/useGetCABOperationsReport");
+    queryStub = { ...queryStub, data: undefined, isError: true, error: new CABReportUnavailableError() };
+    renderAt();
+    expect(screen.getByText("The CAB dashboard is not available on this deployment.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "CAB dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no CAB report/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the last report on screen, marked, while a new period loads", () => {
     queryStub = { ...queryStub, isPlaceholderData: true, isFetching: true };
     renderAt();
     expect(screen.getByRole("progressbar", { name: "Loading the new period" })).toBeInTheDocument();
+    expect(tile("total")).toHaveTextContent("33");
+  });
+
+  it("keeps the last report on screen, marked as not refreshed, when a refresh fails", () => {
+    queryStub = { ...queryStub, isError: true, error: new Error("boom") };
+    renderAt();
+    expect(
+      screen.getByText("Could not refresh the CAB dashboard. The figures below are from the last successful load."),
+    ).toBeInTheDocument();
     expect(tile("total")).toHaveTextContent("33");
   });
 });

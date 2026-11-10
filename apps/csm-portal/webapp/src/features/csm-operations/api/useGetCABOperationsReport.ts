@@ -25,6 +25,14 @@ export interface CABOperationsPeriod {
   to: string;
 }
 
+/** The report is not offered on this deployment (the backend answered 404). */
+export class CABReportUnavailableError extends Error {
+  constructor() {
+    super("The CAB dashboard is not available on this deployment.");
+    this.name = "CABReportUnavailableError";
+  }
+}
+
 /** `/reports/cab-operations` with the period's non-empty ends as its query. */
 export function cabOperationsReportPath(period: CABOperationsPeriod): string {
   const params = new URLSearchParams();
@@ -39,18 +47,24 @@ export function cabOperationsReportPath(period: CABOperationsPeriod): string {
  * CAB dashboard. With neither end given the backend reports the last four
  * calendar months up to today. A changed period keeps showing the previous
  * report until the new one arrives (`isPlaceholderData`), so the page does not
- * blank out while the range is edited. `null` (a 404) is read as "no report".
- * `enabled: false` (a period the backend would refuse) sends nothing.
+ * blank out while the range is edited. A 404 (the report is not offered on this
+ * deployment's data source) is an error, `CABReportUnavailableError`, never an
+ * empty report. `enabled: false` (a period the backend would refuse) sends nothing.
  */
 export function useGetCABOperationsReport(
   period: CABOperationsPeriod,
   options: { enabled?: boolean } = {},
-): UseQueryResult<BeCABOperationsReport | null, Error> {
+): UseQueryResult<BeCABOperationsReport, Error> {
   const api = useBackendApi();
-  return useQuery<BeCABOperationsReport | null, Error>({
+  return useQuery<BeCABOperationsReport, Error>({
     queryKey: [ApiQueryKeys.CAB_OPERATIONS_REPORT, period.from, period.to],
-    queryFn: (): Promise<BeCABOperationsReport | null> =>
-      api.get<BeCABOperationsReport>(cabOperationsReportPath(period)),
+    queryFn: async (): Promise<BeCABOperationsReport> => {
+      // The client resolves a GET's 404 to null; here that means the route is
+      // not registered (the report reads the PostgreSQL tables only).
+      const report = await api.get<BeCABOperationsReport>(cabOperationsReportPath(period));
+      if (report === null) throw new CABReportUnavailableError();
+      return report;
+    },
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     enabled: options.enabled ?? true,

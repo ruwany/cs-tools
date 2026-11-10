@@ -1704,7 +1704,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// CAB operations report: what the CAB was asked and how it decided, for
 		// the Operations dashboard. It reads the Postgres change request and
 		// approval tables only, so like the long-open cases report it is not
-		// offered when change requests are served from the other data source.
+		// offered when change requests are served from the previous system.
 		if cfg.DataSource != config.DataSourceServiceNow {
 			cabOperationsReportHandler = handler.NewCABOperationsReportHandler(
 				service.NewCABOperationsReportService(

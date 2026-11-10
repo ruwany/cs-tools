@@ -8563,10 +8563,10 @@ recorded where the approvals list and the CAB operations report read it). The se
 none; more than `domain.MaxChangeRequestApprovalCommentRunes` (4000) characters is a 400. The decide
 UPDATE (`decideChangeRequestApprovalQuery`) writes it to the deciding approver's own
 `approval_stage_approver.comments` as `COALESCE(NULLIF($6, ''), comments)`, so a decision without one
-never erases a comment already there (a row copied from ServiceNow keeps its own). The customer's answer
+never erases a comment already there (a row copied from the previous system keeps its own). The customer's answer
 through PATCH (`answerCustomerStageViaPatch`) passes none. Optional for both decisions in the API (the
 customer portal backend sends `decision` only); the CSM webapp asks for one on a rejection. The
-ServiceNow data source and the dual-write mirror do not forward it (the previous system's decision API
+previous system's data source and the dual-write mirror do not forward it (the previous system's decision API
 takes the decision only). Tests: `TestChangeRequestService_DecideChangeRequestApproval_Comment`,
 `TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade` (stored and read back).
 
@@ -8574,7 +8574,7 @@ takes the decision only). Tests: `TestChangeRequestService_DecideChangeRequestAp
 
 What the CAB was asked to decide over a period and how it decided, for the Operations CAB dashboard.
 Internal callers only (`internalOnly`, and `RequireInternalCaller` again in the service); Postgres data
-sources only (not registered with `DATA_SOURCE=servicenow`). `?from=&to=` are inclusive `YYYY-MM-DD`
+sources only (not registered when change requests are served from the previous system: a 404). `?from=&to=` are inclusive `YYYY-MM-DD`
 UTC days; the default is the first day of the month three months before `to`'s month up to today; more
 than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
 `repository/cab_operations_report_repo.go` (rows), `service/cab_operations_report_service.go`
@@ -8583,7 +8583,7 @@ than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
 
 - **Which stage is the CAB's** is the approvals list's own rule, reused, not re-written in SQL:
   `isCABStageForReport` runs `changeRequestApprovalStageLabel` then `classifyApprovalStage` on each
-  stage (labelled "CAB Approval", the older "Authorize" / "ECAB Approval"; an unlabelled ServiceNow
+  stage (labelled "CAB Approval", the older "Authorize" / "ECAB Approval"; an unlabelled migrated
   stage is the CAB's when it is an Emergency change's stage in the "CAB Approval" group, else the
   change's second stage). The state-dependent `runtimeApprovalStageKind` is not used: it says what may
   be decided now, and a report is history. The join to `change_request` leaves out a standard change
@@ -8607,8 +8607,8 @@ than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
   as `IsBlankRichText`, tags removed, never HTML). Approver comments go through `ApproverCommentText`:
   a comment typed in the portal's decision dialog is plain text and is kept as typed (trimmed: "Add the
   <env> name", "List<String>", a literal "&lt;" survive); only a value holding an editor's markup
-  (`richTextMarkupTag`: p, div, br, lists, tables, headings, inline formatting tags, as ServiceNow's
-  journal HTML has) is read as rich text. No column says which writer a comment came from, so a plain
+  (`richTextMarkupTag`: p, div, br, lists, tables, headings, inline formatting tags, as the previous
+  system's journal HTML has) is read as rich text. No column says which writer a comment came from, so a plain
   comment containing such a tag is read as markup. Teams are assignment groups (the
   database records no delivery stream). `registry` is capped at 2000 rows (`truncated`,
   `registryTotal`), `pushback` at 200 (`pushbackTotal`). `cabMembers` is the "CAB Approval" group
@@ -8617,13 +8617,13 @@ than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
   changes' other stages, approvers and change rows by id. The queue's read starts from
   `change_request.state = 'AUTHORIZE'` instead (no index on `state`: one scan of the table, and few
   change requests are in Authorize at a time); both share `listCABChanges`. No index was added: on 80,000 stages the plan
-  scans `approval_stage` twice and hash joins in about 40 ms (EXPLAIN ANALYZE, 2026-11-10).
+  scans `approval_stage` twice and hash joins in about 40 ms (EXPLAIN ANALYZE).
 - Tests: `TestBuildCABOperationsReport` (bucketing, rates, outcomes, weeks, teams, pushback),
   `TestBuildCABOperationsReport_Caps`, `TestBuildCABOperationsReport_PartialMonths`, `TestCABStageDecision`,
   `TestCABReportPeriod`, `TestCABOperationsReportService_ExclusiveEnd` (a change waiting since before the
   period is queued) (service), `TestCABOperationsReportHandler`, `TestRichTextPlainText`,
   `TestApproverCommentText`, `TestIsCABStageForReport`,
-  `TestCABOperationsReportIntegration_ListCABChanges` (labelled and ServiceNow-style unlabelled CAB
+  `TestCABOperationsReportIntegration_ListCABChanges` (labelled and migrated-style unlabelled CAB
   stages, approved / rejected / pending / cancelled, a resubmission, a proposal's stage, a plain comment
   kept as typed, and the queue's read: a change in Authorize asked before the period; skipped without
   `CHANGE_REQUEST_TEST_DSN`).

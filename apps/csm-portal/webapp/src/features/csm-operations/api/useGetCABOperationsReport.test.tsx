@@ -26,6 +26,7 @@ vi.mock("@api/backend/client", () => ({
 }));
 
 import {
+  CABReportUnavailableError,
   cabOperationsReportPath,
   useGetCABOperationsReport,
 } from "@features/csm-operations/api/useGetCABOperationsReport";
@@ -53,6 +54,14 @@ describe("useGetCABOperationsReport", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(getMock).toHaveBeenCalledWith("/reports/cab-operations?from=2026-09-01&to=2026-10-31");
     expect(result.current.data).toEqual({ from: "2026-08-01", to: "2026-11-10" });
+  });
+
+  it("fails, rather than reading as an empty report, when the backend does not offer it (a 404)", async () => {
+    getMock.mockResolvedValue(null);
+    const { result } = renderHook(() => useGetCABOperationsReport({ from: "", to: "" }), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeInstanceOf(CABReportUnavailableError);
+    expect(result.current.data).toBeUndefined();
   });
 
   it("sends nothing when not enabled (a period the backend would refuse)", async () => {

@@ -93,7 +93,7 @@ type CABApproverRecord struct {
 	// UpdatedOn is when the row last changed: the decision time once decided.
 	UpdatedOn time.Time
 	// Comment is the row's comment as plain text (ApproverCommentText: as typed
-	// in the portal, markup removed from a ServiceNow one), "" when blank.
+	// in the portal, markup removed from a migrated one), "" when blank.
 	Comment string
 }
 
@@ -112,7 +112,7 @@ func NewCABOperationsReportRepository(db *Scoped) CABOperationsReportRepository 
 // by the rule the change request's approvals list uses to name it
 // (changeRequestApprovalStageLabel, then classifyApprovalStage): a stage with a
 // label is classified by it ("CAB Approval", and the older "Authorize" and
-// "ECAB Approval"); a stage copied from ServiceNow (no label) is the CAB's when
+// "ECAB Approval"); a stage copied from the previous system (no label) is the CAB's when
 // it is an Emergency change's stage in the "CAB Approval" group, or else when it
 // is the change's second stage (position 1, ordered by created_on, id). The
 // stage's state-dependent reading (runtimeApprovalStageKind) is deliberately not

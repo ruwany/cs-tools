@@ -333,6 +333,11 @@ streams: the assignment group is shown, as the delivery stream is not recorded.
 "Outage" means an outage was declared on the change request; whether it is full
 or partial is not recorded.
 
+If the figures cannot be loaded, the page says so and offers **Try again**; it
+never shows an empty dashboard instead. If a refresh fails, the figures already
+shown stay, marked as from the last successful load. Where the dashboard is not
+available on this deployment, the page says that instead.
+
 ## Incidents
 
 The Incidents tab lists incidents with server-side search, pagination, and

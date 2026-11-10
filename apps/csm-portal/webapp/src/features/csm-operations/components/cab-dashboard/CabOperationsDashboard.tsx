@@ -31,7 +31,7 @@ import { useSearchParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import RefreshButton from "@components/RefreshButton";
 import DateRangeFilterFields, { type DateRange } from "@features/csm-operations/components/DateRangeFilterFields";
-import { useGetCABOperationsReport } from "@features/csm-operations/api/useGetCABOperationsReport";
+import { CABReportUnavailableError, useGetCABOperationsReport } from "@features/csm-operations/api/useGetCABOperationsReport";
 import { formatDateOnly, todayUTCDateOnly } from "@features/csm-operations/utils/dateOnly";
 import {
   CAB_DASHBOARD_PARAMS,
@@ -150,20 +150,18 @@ export default function CabOperationsDashboard(): JSX.Element {
     );
   }
 
-  if (query.isError && !report) {
-    return (
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {filters}
-        <QueryErrorState message="Could not load the CAB dashboard." error={query.error} onRetry={() => void query.refetch()} />
-      </Box>
-    );
-  }
-
   if (!report) {
+    // A failed load is an error, never an empty dashboard. Not offered on this
+    // deployment (a 404) is said as such, with no retry: retrying cannot fix it.
+    const unavailable = query.error instanceof CABReportUnavailableError ? query.error : null;
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {filters}
-        <Alert severity="info">There is no CAB report to show.</Alert>
+        <QueryErrorState
+          message={unavailable ? unavailable.message : "Could not load the CAB dashboard."}
+          error={query.error}
+          onRetry={unavailable ? undefined : () => void query.refetch()}
+        />
       </Box>
     );
   }
@@ -175,7 +173,9 @@ export default function CabOperationsDashboard(): JSX.Element {
       {filters}
       {query.isPlaceholderData && <LinearProgress aria-label="Loading the new period" />}
       {query.isError && (
-        <Alert severity="error">Could not load the new period. The figures below are for the period before.</Alert>
+        // Only a failed refresh keeps a report: a new period that fails has no
+        // placeholder (TanStack shows placeholder data while pending only).
+        <Alert severity="error">Could not refresh the CAB dashboard. The figures below are from the last successful load.</Alert>
       )}
 
       <Box

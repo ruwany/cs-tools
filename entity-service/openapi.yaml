@@ -13399,7 +13399,7 @@ paths:
         meeting), and counts once, in that stage's day, week and month (UTC). A stage is
         the CAB's by the rule the change request's approvals list uses: one labelled CAB
         Approval (or the older Authorize / ECAB Approval); for a stage copied from
-        ServiceNow (no label), an Emergency change's stage in the "CAB Approval" group,
+        the previous system (no label), an Emergency change's stage in the "CAB Approval" group,
         else the change's second stage. A standard change proposal's stages are never
         counted. The outcome is the latest CAB stage's: one rejection rejects it, else one
         approval approves it; undecided, it is PENDING while the change waits in
@@ -13408,8 +13408,9 @@ paths:
         listed. The queue is the exception to the period: it is what waits for the CAB now
         (every change request in Authorize whose latest CAB stage is undecided), so
         narrowing the dates cannot hide a backlog. Comments are plain text: one typed in
-        the portal as typed, a ServiceNow one with its markup removed. Postgres data
-        sources only (not registered with DATA_SOURCE=servicenow).
+        the portal as typed, a migrated one with its markup removed. PostgreSQL data
+        sources only: not registered when change requests are served from the previous
+        system (404).
       operationId: getCABOperationsReport
       parameters:
         - name: from
@@ -13447,8 +13448,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not registered on this deployment (change requests are served from the previous system).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be checked, or the database is unavailable.
           content:
             application/json:
               schema:
@@ -28752,8 +28765,8 @@ components:
             rejecting, or what they want done first). Trimmed; blank is none; at most 4000
             characters (400 otherwise). Stored on the approver's own row and returned as
             the approver's comments by GET /change-requests/{id}/approvals; a decision
-            without one leaves any earlier comment as it was. Not forwarded with
-            DATA_SOURCE=servicenow. Optional for both decisions here (the CSM portal asks
+            without one leaves any earlier comment as it was. Not forwarded to the
+            previous system. Optional for both decisions here (the CSM portal asks
             for one on a rejection).
 
 

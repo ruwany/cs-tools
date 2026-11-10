@@ -46,7 +46,7 @@ const (
 	cabRptRequester  = "3cab0000-0000-0000-0000-0000000000c0"
 
 	cabRptLabelled    = "3cab0000-0000-0000-0001-000000000001" // Peer then CAB Approval, approved with a comment
-	cabRptUnlabelled  = "3cab0000-0000-0000-0001-000000000002" // ServiceNow style, second stage rejected
+	cabRptUnlabelled  = "3cab0000-0000-0000-0001-000000000002" // migrated style, second stage rejected
 	cabRptEmergency   = "3cab0000-0000-0000-0001-000000000003" // unlabelled stage in the CAB group, pending
 	cabRptCancelled   = "3cab0000-0000-0000-0001-000000000004" // CAB stage, approvers cancelled
 	cabRptEarlier     = "3cab0000-0000-0000-0001-000000000005" // CAB stage in February only
@@ -152,7 +152,7 @@ func TestCABOperationsReportIntegration_ListCABChanges(t *testing.T) {
 	stage(cabRptLabelled, "2001-03-01T09:00:00Z", peerLabel, nil, [3]string{cabRptBob, "APPROVED", ""})
 	stage(cabRptLabelled, "2001-03-02T09:00:00Z", cabLabel, cabGroup, [3]string{cabRptAlice, "APPROVED", "<p>Add the verification steps</p>"})
 
-	// ServiceNow style: no labels; the second stage is the CAB's. Its own
+	// Migrated style: no labels; the second stage is the CAB's. Its own
 	// deployment is staging, a linked one is production.
 	cr(cabRptUnlabelled, "CABRPT2", "CANCELED", "NORMAL", staging, nil)
 	exec(`INSERT INTO change_request_deployment (id, change_request_id, deployment_id) VALUES (gen_random_uuid(), $1, $2)`,
