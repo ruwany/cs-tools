@@ -164,8 +164,8 @@ func cabApprovalRate(approved, rejected int) *float64 {
 	return &r
 }
 
-// cabDecision is what the report reads from a change request's latest CAB stage.
-type cabDecision struct {
+// cabStageOutcome is what the report reads from a change request's latest CAB stage.
+type cabStageOutcome struct {
 	outcome   domain.CABOperationsOutcome
 	decidedBy string
 	decidedOn *time.Time
@@ -176,7 +176,7 @@ type cabDecision struct {
 // approval makes it approved): rejected names the rejecting member (the latest
 // rejection), approved the first to approve. Undecided, it is pending while the
 // change waits in Authorize, cancelled otherwise.
-func cabStageDecision(c repository.CABChangeRecord) cabDecision {
+func cabStageDecision(c repository.CABChangeRecord) cabStageOutcome {
 	stage := c.Stages[len(c.Stages)-1]
 	var rejected, approved *repository.CABApproverRecord
 	for i := range stage.Approvers {
@@ -195,14 +195,14 @@ func cabStageDecision(c repository.CABChangeRecord) cabDecision {
 	switch {
 	case rejected != nil:
 		t := rejected.UpdatedOn
-		return cabDecision{outcome: domain.CABOperationsOutcomeRejected, decidedBy: cabPersonName(rejected.Name, rejected.Email), decidedOn: &t}
+		return cabStageOutcome{outcome: domain.CABOperationsOutcomeRejected, decidedBy: cabPersonName(rejected.Name, rejected.Email), decidedOn: &t}
 	case approved != nil:
 		t := approved.UpdatedOn
-		return cabDecision{outcome: domain.CABOperationsOutcomeApproved, decidedBy: cabPersonName(approved.Name, approved.Email), decidedOn: &t}
+		return cabStageOutcome{outcome: domain.CABOperationsOutcomeApproved, decidedBy: cabPersonName(approved.Name, approved.Email), decidedOn: &t}
 	case strings.EqualFold(c.State, "AUTHORIZE"):
-		return cabDecision{outcome: domain.CABOperationsOutcomePending}
+		return cabStageOutcome{outcome: domain.CABOperationsOutcomePending}
 	}
-	return cabDecision{outcome: domain.CABOperationsOutcomeCancelled}
+	return cabStageOutcome{outcome: domain.CABOperationsOutcomeCancelled}
 }
 
 func cabPersonName(name, email string) string {
@@ -212,7 +212,7 @@ func cabPersonName(name, email string) string {
 	return strings.TrimSpace(email)
 }
 
-func cabCount(counts *domain.CABOperationsCounts, c repository.CABChangeRecord, d cabDecision) {
+func cabCount(counts *domain.CABOperationsCounts, c repository.CABChangeRecord, d cabStageOutcome) {
 	counts.Total++
 	switch d.outcome {
 	case domain.CABOperationsOutcomeApproved:
@@ -290,7 +290,7 @@ func sortedTeamCounts(tally map[string]*cabTeamTally, limit int) []domain.CABOpe
 	return out
 }
 
-func tallyTeam(m map[string]*cabTeamTally, c repository.CABChangeRecord, d cabDecision) {
+func tallyTeam(m map[string]*cabTeamTally, c repository.CABChangeRecord, d cabStageOutcome) {
 	t := m[c.AssignmentGroupID]
 	if t == nil {
 		t = &cabTeamTally{id: c.AssignmentGroupID, name: c.AssignmentGroup}
@@ -365,7 +365,7 @@ func buildCABOperationsReport(changes, open []repository.CABChangeRecord, member
 
 	type decided struct {
 		c repository.CABChangeRecord
-		d cabDecision
+		d cabStageOutcome
 		// askedOn is the latest CAB stage's created_on.
 		askedOn time.Time
 	}

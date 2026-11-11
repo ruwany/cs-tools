@@ -30,6 +30,9 @@ failure class turns up during review that isn't on this list, add it here in the
 - [ ] `git fetch upstream main` + `git merge-tree --write-tree HEAD upstream/main` checked clean
       before pushing — `upstream/main` moves fast; don't trust a merge that was clean an hour ago
       (see the repo-root `CLAUDE.md`).
+- [ ] A clean `merge-tree` is not a clean build: when another open branch adds to the same package,
+      run `go vet ./...` on the two merged — a type on one branch and a test helper on the other both
+      named `cabDecision` merged without a conflict and broke `internal/service`'s tests.
 - [ ] No real name/email/URL/org-specific identifier copied from a screenshot, pasted log, or API
       response into code, tests, docs, or commit/PR text — use a generic placeholder.
 - [ ] No ticket/issue number or repo name cited in a code comment — explain the why directly.
