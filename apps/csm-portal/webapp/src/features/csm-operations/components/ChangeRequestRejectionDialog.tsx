@@ -26,70 +26,40 @@ import {
   TextField,
 } from "@wso2/oxygen-ui";
 import { useRef, useState, type JSX } from "react";
-import type { BeChangeRequestApprovalDecision } from "@api/backend/types";
 
 /** The longest comment the backend stores with a decision (characters, once trimmed). */
 export const CHANGE_REQUEST_APPROVAL_COMMENT_MAX = 4000;
 
-interface DecisionCopy {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  confirmColor: "success" | "error";
-  helper: string;
-}
-
-const COPY: Record<BeChangeRequestApprovalDecision, DecisionCopy> = {
-  approved: {
-    title: "Approve this change request?",
-    body: "Your approval is recorded on your row of this approval stage.",
-    confirmLabel: "Approve",
-    confirmColor: "success",
-    helper: "Optional. For example, what should be checked before the change goes ahead.",
-  },
-  rejected: {
-    title: "Reject this change request?",
-    body: "Your rejection is recorded on your row of this approval stage. One rejection rejects the stage.",
-    confirmLabel: "Reject",
-    confirmColor: "error",
-    helper: "Required. Say why, so the requester knows what to change.",
-  },
-};
-
-interface ChangeRequestApprovalDecisionDialogProps {
-  decision: BeChangeRequestApprovalDecision;
-  /** True while the decision is being sent. */
+interface ChangeRequestRejectionDialogProps {
+  /** True while the rejection is being sent. */
   isSubmitting: boolean;
   /** The message of the last refused attempt, shown in the dialog so the comment is kept. */
   error?: string | null;
   onClose: () => void;
-  /** Called with the trimmed comment ("" for none: only an approval may have none). */
+  /** Called with the trimmed comment, never blank. */
   onConfirm: (comment: string) => void;
 }
 
 /**
- * Asks for the approver's comment before an Approve / Reject is sent
+ * Asks for the approver's reason before a Reject is sent
  * (`POST /change-requests/{id}/approvals/decision`, `comment`). The comment is
- * optional to approve and required to reject; it is stored on the approver's own
- * row and shown in the Comments column of the approvals table (and in the CAB
- * operations dashboard's pushback list).
+ * required; it is stored on the approver's own row and shown in the Comments
+ * column of the approvals table (and in the CAB operations dashboard's pushback
+ * list). Approve has no dialog: it is sent on the click, with no comment.
  */
-export default function ChangeRequestApprovalDecisionDialog({
-  decision,
+export default function ChangeRequestRejectionDialog({
   isSubmitting,
   error,
   onClose,
   onConfirm,
-}: ChangeRequestApprovalDecisionDialogProps): JSX.Element {
+}: ChangeRequestRejectionDialogProps): JSX.Element {
   const [comment, setComment] = useState("");
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
-  const copy = COPY[decision];
-  const required = decision === "rejected";
   const trimmed = comment.trim();
   // Counted in characters (code points), as the backend counts them.
   const length = Array.from(trimmed).length;
   const tooLong = length > CHANGE_REQUEST_APPROVAL_COMMENT_MAX;
-  const canSubmit = !isSubmitting && !tooLong && (!required || length > 0);
+  const canSubmit = !isSubmitting && !tooLong && length > 0;
 
   return (
     <Dialog
@@ -99,22 +69,22 @@ export default function ChangeRequestApprovalDecisionDialog({
       }}
       maxWidth="xs"
       fullWidth
-      aria-labelledby="cr-approval-decision-title"
-      aria-describedby="cr-approval-decision-body"
+      aria-labelledby="cr-rejection-title"
+      aria-describedby="cr-rejection-body"
       // Focus the field once the dialog has opened (the clicked row button keeps
       // focus otherwise, as in ChangeRequestTransitionReasonDialog).
       slotProps={{ transition: { onEntered: () => commentRef.current?.focus() } }}
     >
-      <DialogTitle id="cr-approval-decision-title">{copy.title}</DialogTitle>
+      <DialogTitle id="cr-rejection-title">Reject this change request?</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           {error && <Alert severity="error">{error}</Alert>}
-          <DialogContentText id="cr-approval-decision-body" variant="body2">
-            {copy.body}
+          <DialogContentText id="cr-rejection-body" variant="body2">
+            Your rejection is recorded on your row of this approval stage. One rejection rejects the stage.
           </DialogContentText>
           <TextField
             label="Comment"
-            required={required}
+            required
             inputRef={commentRef}
             multiline
             minRows={3}
@@ -127,7 +97,7 @@ export default function ChangeRequestApprovalDecisionDialog({
             helperText={
               tooLong
                 ? `At most ${CHANGE_REQUEST_APPROVAL_COMMENT_MAX} characters (${length} now).`
-                : copy.helper
+                : "Required. Say why, so the requester knows what to change."
             }
           />
         </Box>
@@ -138,12 +108,12 @@ export default function ChangeRequestApprovalDecisionDialog({
         </Button>
         <Button
           variant="contained"
-          color={copy.confirmColor}
+          color="error"
           onClick={() => onConfirm(trimmed)}
           disabled={!canSubmit}
           loading={isSubmitting}
         >
-          {copy.confirmLabel}
+          Reject
         </Button>
       </DialogActions>
     </Dialog>

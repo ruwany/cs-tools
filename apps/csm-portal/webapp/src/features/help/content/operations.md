@@ -256,7 +256,9 @@ From the detail page a CS engineer can:
   effort, and while the sync still runs it can rewrite these columns.
 - **Approve or reject** a pending approval stage, if the engineer is listed
   as an approver on it: the Approve/Reject buttons only appear on that
-  engineer's own pending approval.
+  engineer's own pending approval. Approve is recorded on the click. Reject
+  asks for a comment first, saying why, so the requester knows what to
+  change; it is shown in the approvals table's Comments column.
 - **Emergency changes proceed without the customer.** An Emergency change goes
   New -> Request Approval -> Authorize (one CAB Approval stage; no Peer stage) ->
   Scheduled, and is never sent to Customer Approval or Customer Review. In the

@@ -337,10 +337,9 @@ test.describe("change request lifecycle — approve cascades to Authorize", () =
       const approveButton = detail.approveButton(ALICE, PEER);
       await expect(approveButton).toBeVisible();
 
-      await approveButton.click();
       const [response] = await Promise.all([
         page.waitForResponse((r) => /\/change-requests\/[^/]+\/approvals?/.test(r.url()), { timeout: 15_000 }),
-        detail.decisionDialog("approve").getByRole("button", { name: "Approve", exact: true }).click(),
+        approveButton.click(),
       ]);
       expect(response.ok(), `Approve decision failed (${response.status()})`).toBeTruthy();
 

@@ -8605,7 +8605,7 @@ than 24 calendar months, `from` after `to` or a malformed date is a 400. Code:
   PRIMARY_PRODUCTION. `outageDeclared`: `service_outage_downtime` has visible text (`IsBlankRichText`).
   The outage summary is plain text (`RichTextPlainText`, `repository/rich_text_plain.go`: the same parse
   as `IsBlankRichText`, tags removed, never HTML). Approver comments go through `ApproverCommentText`:
-  a comment typed in the portal's decision dialog is plain text and is kept as typed (trimmed: "Add the
+  a comment typed in the portal's rejection dialog is plain text and is kept as typed (trimmed: "Add the
   <env> name", "List<String>", a literal "&lt;" survive); only a value holding an editor's markup
   (`richTextMarkupTag`: p, div, br, lists, tables, headings, inline formatting tags, as the previous
   system's journal HTML has) is read as rich text. No column says which writer a comment came from, so a plain

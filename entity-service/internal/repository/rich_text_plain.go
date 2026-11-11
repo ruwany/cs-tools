@@ -101,7 +101,7 @@ var richTextMarkupTag = regexp.MustCompile(
 
 // ApproverCommentText is an approval_stage_approver comment as its reader
 // should see it, "" when blank. The column holds two kinds of text: a comment
-// typed in this portal's decision dialog is plain text and is kept exactly as
+// typed in this portal's rejection dialog is plain text and is kept exactly as
 // typed (trimmed), so "Add the <env> name", "List<String>", a quoted "<script>"
 // or a literal "&lt;" survive; a comment copied from the previous system may be HTML, and
 // only a value holding an editor's markup (richTextMarkupTag) is read as rich

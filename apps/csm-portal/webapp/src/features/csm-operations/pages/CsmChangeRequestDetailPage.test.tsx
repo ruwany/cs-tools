@@ -2299,9 +2299,10 @@ function lcSeed(
   // The approvals panel's Approve/Reject drives the fake as the signed-in user. The
   // customer stages are not decided from this page (the customer answers in the customer
   // portal, see `lcCustomerDecides`), so only the internal stages are candidates.
-  // The approvals panel sends a decision from its dialog with mutate(input, {onSuccess, onError}):
-  // like React Query, a refusal goes to onError (the dialog shows it) and a success to onSuccess
-  // (the dialog closes). Called with no options (a test calling the fake directly) it throws.
+  // The approvals panel sends a decision with mutate(input, {onSuccess?, onError}): Approve on the
+  // click, a rejection from its dialog. Like React Query, a refusal goes to onError (the banner, or
+  // the rejection dialog) and a success to onSuccess (the rejection dialog closes). Called with no
+  // options (a test calling the fake directly) it throws.
   const decide = (input: { decision: "approved" | "rejected"; comment?: string }): void => {
     // The caller's pending stage: their row on a stage decidable in the CR's
     // current state, else (all of theirs are stale) their first one.
@@ -4302,18 +4303,15 @@ const LC_MEMBERS = [
 
 /** Drives a seeded CR from New to the point its internal approval is granted. */
 /**
- * Clicks Approve / Reject on the signed-in user's row and, when that opens the decision dialog
- * (the button was enabled), confirms it: an approval with no comment, a rejection with one
- * (the dialog requires it).
+ * Clicks Approve / Reject on the signed-in user's row. Approve is sent on the click; Reject opens
+ * its dialog, which is confirmed with a comment (the dialog requires one).
  */
 function lcClickDecision(decision: "approved" | "rejected", comment = "Not ready"): void {
   const label = decision === "approved" ? "Approve" : "Reject";
   fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}$`, "i") }));
-  const dialog = screen.queryByRole("dialog", { name: new RegExp(`^${label} this change request\\?$`, "i") });
-  if (!dialog) return;
-  if (decision === "rejected") {
-    fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: comment } });
-  }
+  if (decision === "approved") return;
+  const dialog = screen.getByRole("dialog", { name: /^reject this change request\?$/i });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: comment } });
   fireEvent.click(within(dialog).getByRole("button", { name: label }));
 }
 

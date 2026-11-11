@@ -516,24 +516,20 @@ export class ChangeRequestDetailPage {
     return scope.getByRole("button", { name: "Reject" });
   }
 
-  /** The dialog Approve / Reject opens, which asks for the approver's comment. */
-  decisionDialog(decision: "approve" | "reject"): Locator {
-    return this.page.getByRole("dialog", { name: decision === "approve" ? "Approve this change request?" : "Reject this change request?" });
+  /** The dialog Reject opens, which asks for the (required) comment. Approve has none. */
+  rejectionDialog(): Locator {
+    return this.page.getByRole("dialog", { name: "Reject this change request?" });
   }
 
-  /** Approve: opens the decision dialog and confirms it, with `comment` when given (optional to approve). */
-  async approve(approverName?: string, stage?: string, comment?: string): Promise<void> {
+  /** Approve: sent on the click, with no comment. */
+  async approve(approverName?: string, stage?: string): Promise<void> {
     await this.approveButton(approverName, stage).click();
-    const dialog = this.decisionDialog("approve");
-    if (comment) await dialog.getByRole("textbox", { name: /comment/i }).fill(comment);
-    await dialog.getByRole("button", { name: "Approve", exact: true }).click();
-    await dialog.waitFor({ state: "hidden" });
   }
 
-  /** Reject: opens the decision dialog and confirms it with `comment` (a rejection needs one). */
+  /** Reject: opens the rejection dialog and confirms it with `comment` (a rejection needs one). */
   async reject(approverName?: string, comment = "Not ready to go ahead"): Promise<void> {
     await this.rejectButton(approverName).click();
-    const dialog = this.decisionDialog("reject");
+    const dialog = this.rejectionDialog();
     await dialog.getByRole("textbox", { name: /comment/i }).fill(comment);
     await dialog.getByRole("button", { name: "Reject", exact: true }).click();
     await dialog.waitFor({ state: "hidden" });

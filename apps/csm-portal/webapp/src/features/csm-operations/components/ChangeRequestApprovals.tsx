@@ -37,7 +37,8 @@ import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { BackendApiError } from "@api/backend/client";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
-import ChangeRequestApprovalDecisionDialog from "@features/csm-operations/components/ChangeRequestApprovalDecisionDialog";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import ChangeRequestRejectionDialog from "@features/csm-operations/components/ChangeRequestRejectionDialog";
 import ApprovalGroupDialog, {
   type ApprovalGroupPerson,
   type ApprovalGroupTarget,
@@ -89,7 +90,8 @@ function isMyPendingApproval(approver: BeChangeRequestApprover, currentUserId?: 
 }
 
 interface DecideHandlers {
-  /** Opens the decision dialog, which asks for the comment and sends the decision. */
+  /** Approve is sent on the click, with no comment; Reject opens the rejection
+   * dialog, which asks for the (required) comment and sends it. */
   onDecide: (decision: BeChangeRequestApprovalDecision) => void;
   isDeciding: boolean;
 }
@@ -267,47 +269,56 @@ export default function ChangeRequestApprovals({
 }): JSX.Element | null {
   const { data, isLoading, isError, error } = useGetChangeRequestApprovals(id);
   const { user } = useCurrentUser();
+  const { showError } = useErrorBanner();
   const decideApproval = useDecideChangeRequestApproval();
   // The group whose page is open (clicked from an Assignment group cell).
   const [openGroup, setOpenGroup] = useState<ApprovalGroupTarget | null>(null);
-  // The decision whose dialog is open (Approve or Reject clicked), and the
-  // message of its last refused attempt. The dialog keeps the typed comment, so
-  // a refusal is shown inside it rather than in the page banner behind it.
-  const [pendingDecision, setPendingDecision] = useState<BeChangeRequestApprovalDecision | null>(null);
-  const [decisionError, setDecisionError] = useState<string | null>(null);
+  // Whether the rejection dialog is open, and the message of its last refused
+  // attempt. The dialog keeps the typed comment, so a refusal is shown inside it
+  // rather than in the page banner behind it.
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectionError, setRejectionError] = useState<string | null>(null);
 
   const decide: DecideHandlers | undefined = id
     ? {
         isDeciding: decideApproval.isPending,
         onDecide: (decision) => {
-          setDecisionError(null);
-          setPendingDecision(decision);
+          if (decision === "rejected") {
+            setRejectionError(null);
+            setRejecting(true);
+            return;
+          }
+          // Approve is sent straight away, with no comment; a refusal goes to
+          // the page banner, as there is no dialog to show it in.
+          decideApproval.mutate(
+            { id, decision },
+            { onError: (err) => showError(decisionErrorMessage(err, decision), err) },
+          );
         },
       }
     : undefined;
 
-  const submitDecision = (decision: BeChangeRequestApprovalDecision, comment: string): void => {
+  const submitRejection = (comment: string): void => {
     if (!id) return;
-    setDecisionError(null);
+    setRejectionError(null);
     decideApproval.mutate(
-      { id, decision, ...(comment ? { comment } : {}) },
+      { id, decision: "rejected", comment },
       {
-        onSuccess: () => setPendingDecision(null),
-        onError: (err) => setDecisionError(decisionErrorMessage(err, decision)),
+        onSuccess: () => setRejecting(false),
+        onError: (err) => setRejectionError(decisionErrorMessage(err, "rejected")),
       },
     );
   };
 
-  const decisionDialog = pendingDecision ? (
-    <ChangeRequestApprovalDecisionDialog
-      decision={pendingDecision}
+  const rejectionDialog = rejecting ? (
+    <ChangeRequestRejectionDialog
       isSubmitting={decideApproval.isPending}
-      error={decisionError}
+      error={rejectionError}
       onClose={() => {
-        setPendingDecision(null);
-        setDecisionError(null);
+        setRejecting(false);
+        setRejectionError(null);
       }}
-      onConfirm={(comment) => submitDecision(pendingDecision, comment)}
+      onConfirm={submitRejection}
     />
   ) : null;
 
@@ -430,7 +441,7 @@ export default function ChangeRequestApprovals({
         </TableContainer>
       </Box>
       {openGroup && <ApprovalGroupDialog target={openGroup} onClose={() => setOpenGroup(null)} />}
-      {decisionDialog}
+      {rejectionDialog}
     </Card>
   );
 }
